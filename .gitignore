@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Large raw decompiled asset dumps (>3GB, 45,000+ files)
+# To keep git lightning-fast and avoid OneDrive sync lockup
+(SWF Data)/
+WuQi_X0_v1905/
+newMc_v1840/
+ChongZhi_v1915/
+Other_v1830/
+Map0_v1910/
+DataX_v1920/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,182 @@
+package src
+{
+   import com.hotpoint.braveManIII.models.container.*;
+   import flash.display.*;
+   import flash.events.*;
+   import flash.geom.*;
+   import flash.text.*;
+   import src.tool.*;
+   
+   public class Door extends MovieClip
+   {
+      
+      public var openYN:Boolean = false;
+      
+      private var inTime:int = -1;
+      
+      private var time:int = 0;
+      
+      public function Door()
+      {
+         super();
+         if(this.name == "地图" || this.name == "回村2" || this.name == "继续2")
+         {
+            Open();
+         }
+         else if(this.name == "苍井空" && (Boolean(Main.questBag()) || Boolean(Main.getAllQuest())))
+         {
+            Open();
+         }
+         else if(this.name == "加藤鹰" && Boolean(Main.getAllQuest()))
+         {
+            Open();
+         }
+         else if(this.name == "竞技场")
+         {
+            Open();
+         }
+         else
+         {
+            Close();
+         }
+         if(TiaoShi.chuanSongYN)
+         {
+            Open();
+         }
+      }
+      
+      public function Open(param1:int = 0) : *
+      {
+         openYN = true;
+         if(!visible)
+         {
+            time = param1;
+         }
+         addEventListener(Event.ENTER_FRAME,onENTER_FRAME);
+      }
+      
+      public function Close() : *
+      {
+         openYN = false;
+         this.visible = false;
+         removeEventListener(Event.ENTER_FRAME,onENTER_FRAME);
+      }
+      
+      private function onENTER_FRAME(param1:*) : *
+      {
+         var _loc2_:Player = null;
+         if(this.parent != Main.world)
+         {
+            removeEventListener(Event.ENTER_FRAME,onENTER_FRAME);
+            return;
+         }
+         if(time > 0 && this.name != "竞技场")
+         {
+            --time;
+            return;
+         }
+         this.visible = true;
+         if(inTime > 0)
+         {
+            --inTime;
+            return;
+         }
+         if(inTime == 0)
+         {
+            inTime = -1;
+            if(this.name != "竞技场")
+            {
+               removeEventListener(Event.ENTER_FRAME,onENTER_FRAME);
+            }
+            GoWhere();
+            return;
+         }
+         if(inTime == -1)
+         {
+            i2 = 0;
+            while(i2 < Player.All.length)
+            {
+               _loc2_ = Player.All[i2];
+               if(Boolean(this.visible) && Boolean(_loc2_.hit) && Boolean(this.hit.hitTestObject(_loc2_.hit)))
+               {
+                  if(_loc2_.getKeyStatus("上",2) && this.parent == Main.world)
+                  {
+                     if(this.name == "竞技场")
+                     {
+                        if(Main.player1.level.getValue() < 50 || Boolean(Main.P1P2) && (Main.player1.level.getValue() < 50 || Main.player2.level.getValue() < 50))
+                        {
+                           NewMC.Open("文字提示",Main._stage,480,400,30,0,true,2,"等级达到50级才可进入");
+                        }
+                        else
+                        {
+                           PK_UI.Open();
+                        }
+                     }
+                     else
+                     {
+                        inTime = 9;
+                        Main.player_1.x = Main.player_1.y = -5000;
+                        if(Boolean(Main.P1P2) && Boolean(Main.player_2))
+                        {
+                           Main.player_2.x = Main.player_2.y = -5000;
+                        }
+                        Play_Interface.interfaceX.black_guoDu_mc.gotoAndPlay(1);
+                     }
+                  }
+               }
+               ++i2;
+            }
+         }
+      }
+      
+      public function GoWhere() : *
+      {
+         var _loc1_:WinShow2 = null;
+         var _loc2_:WinShow = null;
+         if(this.name != "竞技场")
+         {
+            Close();
+         }
+         Main.allClosePanel();
+         if(this.name == "地图")
+         {
+            SelMap.Open();
+         }
+         else if(this.name == "继续" || this.name == "继续2")
+         {
+            Main.gameNum2.setValue(Main.gameNum2.getValue() + 1);
+            Main._this.GameStart();
+         }
+         else if(this.name == "回村")
+         {
+            if(GameData.gameLV == 5)
+            {
+               _loc1_ = new WinShow2();
+            }
+            else
+            {
+               _loc2_ = new WinShow();
+            }
+         }
+         else if(this.name == "回村2")
+         {
+            Main.gameNum.setValue(0);
+            Main.gameNum2.setValue(0);
+            Main._this.GameStart();
+         }
+         else if(this.name == "苍井空")
+         {
+            Main.gameNum.setValue(0);
+            Main.gameNum2.setValue(1);
+            Main._this.GameStart();
+         }
+         else if(this.name == "加藤鹰")
+         {
+            Main.gameNum.setValue(0);
+            Main.gameNum2.setValue(2);
+            Main._this.GameStart();
+         }
+      }
+   }
+}
+

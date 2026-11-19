@@ -1,0 +1,451 @@
+{
+  "source": "yzzr_all_swf\\WuQi_X0_v1905.swf",
+  "swf_version": 12,
+  "declared_length": 27105007,
+  "sprites": {
+    "1044": {
+      "class_name": "剑蓝4",
+      "frame_count": 413,
+      "labels": [
+        {
+          "name": "走",
+          "frame": 1,
+          "end_frame": 12
+        },
+        {
+          "name": "跑",
+          "frame": 13,
+          "end_frame": 24
+        },
+        {
+          "name": "站",
+          "frame": 25,
+          "end_frame": 29
+        },
+        {
+          "name": "跳",
+          "frame": 30,
+          "end_frame": 33
+        },
+        {
+          "name": "被打",
+          "frame": 34,
+          "end_frame": 46
+        },
+        {
+          "name": "攻击1",
+          "frame": 47,
+          "end_frame": 54
+        },
+        {
+          "name": "攻击2",
+          "frame": 55,
+          "end_frame": 62
+        },
+        {
+          "name": "攻击3",
+          "frame": 63,
+          "end_frame": 70
+        },
+        {
+          "name": "攻击4",
+          "frame": 71,
+          "end_frame": 78
+        },
+        {
+          "name": "跑攻",
+          "frame": 79,
+          "end_frame": 89
+        },
+        {
+          "name": "上挑",
+          "frame": 90,
+          "end_frame": 101
+        },
+        {
+          "name": "下斩",
+          "frame": 102,
+          "end_frame": 124
+        },
+        {
+          "name": "转职技能1",
+          "frame": 125,
+          "end_frame": 147
+        },
+        {
+          "name": "转职技能2",
+          "frame": 148,
+          "end_frame": 186
+        },
+        {
+          "name": "转职技能3",
+          "frame": 187,
+          "end_frame": 207
+        },
+        {
+          "name": "转职技能4",
+          "frame": 208,
+          "end_frame": 258
+        },
+        {
+          "name": "技能1",
+          "frame": 259,
+          "end_frame": 277
+        },
+        {
+          "name": "技能4",
+          "frame": 278,
+          "end_frame": 323
+        },
+        {
+          "name": "技能3",
+          "frame": 324,
+          "end_frame": 359
+        },
+        {
+          "name": "技能2",
+          "frame": 360,
+          "end_frame": 399
+        },
+        {
+          "name": "怪物技能",
+          "frame": 400,
+          "end_frame": 413
+        }
+      ]
+    },
+    "1108": {
+      "class_name": "剑蓝3",
+      "frame_count": 413,
+      "labels": [
+        {
+          "name": "走",
+          "frame": 1,
+          "end_frame": 12
+        },
+        {
+          "name": "跑",
+          "frame": 13,
+          "end_frame": 24
+        },
+        {
+          "name": "站",
+          "frame": 25,
+          "end_frame": 29
+        },
+        {
+          "name": "跳",
+          "frame": 30,
+          "end_frame": 33
+        },
+        {
+          "name": "被打",
+          "frame": 34,
+          "end_frame": 46
+        },
+        {
+          "name": "攻击1",
+          "frame": 47,
+          "end_frame": 54
+        },
+        {
+          "name": "攻击2",
+          "frame": 55,
+          "end_frame": 62
+        },
+        {
+          "name": "攻击3",
+          "frame": 63,
+          "end_frame": 70
+        },
+        {
+          "name": "攻击4",
+          "frame": 71,
+          "end_frame": 78
+        },
+        {
+          "name": "跑攻",
+          "frame": 79,
+          "end_frame": 89
+        },
+        {
+          "name": "上挑",
+          "frame": 90,
+          "end_frame": 101
+        },
+        {
+          "name": "下斩",
+          "frame": 102,
+          "end_frame": 124
+        },
+        {
+          "name": "转职技能1",
+          "frame": 125,
+          "end_frame": 147
+        },
+        {
+          "name": "转职技能2",
+          "frame": 148,
+          "end_frame": 186
+        },
+        {
+          "name": "转职技能3",
+          "frame": 187,
+          "end_frame": 207
+        },
+        {
+          "name": "转职技能4",
+          "frame": 208,
+          "end_frame": 258
+        },
+        {
+          "name": "技能1",
+          "frame": 259,
+          "end_frame": 277
+        },
+        {
+          "name": "技能4",
+          "frame": 278,
+          "end_frame": 323
+        },
+        {
+          "name": "技能3",
+          "frame": 324,
+          "end_frame": 359
+        },
+        {
+          "name": "技能2",
+          "frame": 360,
+          "end_frame": 399
+        },
+        {
+          "name": "怪物技能",
+          "frame": 400,
+          "end_frame": 413
+        }
+      ]
+    },
+    "1168": {
+      "class_name": "剑蓝2",
+      "frame_count": 413,
+      "labels": [
+        {
+          "name": "走",
+          "frame": 1,
+          "end_frame": 12
+        },
+        {
+          "name": "跑",
+          "frame": 13,
+          "end_frame": 24
+        },
+        {
+          "name": "站",
+          "frame": 25,
+          "end_frame": 29
+        },
+        {
+          "name": "跳",
+          "frame": 30,
+          "end_frame": 33
+        },
+        {
+          "name": "被打",
+          "frame": 34,
+          "end_frame": 46
+        },
+        {
+          "name": "攻击1",
+          "frame": 47,
+          "end_frame": 54
+        },
+        {
+          "name": "攻击2",
+          "frame": 55,
+          "end_frame": 62
+        },
+        {
+          "name": "攻击3",
+          "frame": 63,
+          "end_frame": 70
+        },
+        {
+          "name": "攻击4",
+          "frame": 71,
+          "end_frame": 78
+        },
+        {
+          "name": "跑攻",
+          "frame": 79,
+          "end_frame": 89
+        },
+        {
+          "name": "上挑",
+          "frame": 90,
+          "end_frame": 101
+        },
+        {
+          "name": "下斩",
+          "frame": 102,
+          "end_frame": 124
+        },
+        {
+          "name": "转职技能1",
+          "frame": 125,
+          "end_frame": 147
+        },
+        {
+          "name": "转职技能2",
+          "frame": 148,
+          "end_frame": 186
+        },
+        {
+          "name": "转职技能3",
+          "frame": 187,
+          "end_frame": 207
+        },
+        {
+          "name": "转职技能4",
+          "frame": 208,
+          "end_frame": 258
+        },
+        {
+          "name": "技能1",
+          "frame": 259,
+          "end_frame": 277
+        },
+        {
+          "name": "技能4",
+          "frame": 278,
+          "end_frame": 323
+        },
+        {
+          "name": "技能3",
+          "frame": 324,
+          "end_frame": 359
+        },
+        {
+          "name": "技能2",
+          "frame": 360,
+          "end_frame": 399
+        },
+        {
+          "name": "怪物技能",
+          "frame": 400,
+          "end_frame": 413
+        }
+      ]
+    },
+    "1235": {
+      "class_name": "剑蓝1",
+      "frame_count": 413,
+      "labels": [
+        {
+          "name": "走",
+          "frame": 1,
+          "end_frame": 12
+        },
+        {
+          "name": "跑",
+          "frame": 13,
+          "end_frame": 24
+        },
+        {
+          "name": "站",
+          "frame": 25,
+          "end_frame": 29
+        },
+        {
+          "name": "跳",
+          "frame": 30,
+          "end_frame": 33
+        },
+        {
+          "name": "被打",
+          "frame": 34,
+          "end_frame": 46
+        },
+        {
+          "name": "攻击1",
+          "frame": 47,
+          "end_frame": 54
+        },
+        {
+          "name": "攻击2",
+          "frame": 55,
+          "end_frame": 62
+        },
+        {
+          "name": "攻击3",
+          "frame": 63,
+          "end_frame": 70
+        },
+        {
+          "name": "攻击4",
+          "frame": 71,
+          "end_frame": 78
+        },
+        {
+          "name": "跑攻",
+          "frame": 79,
+          "end_frame": 89
+        },
+        {
+          "name": "上挑",
+          "frame": 90,
+          "end_frame": 101
+        },
+        {
+          "name": "下斩",
+          "frame": 102,
+          "end_frame": 124
+        },
+        {
+          "name": "转职技能1",
+          "frame": 125,
+          "end_frame": 147
+        },
+        {
+          "name": "转职技能2",
+          "frame": 148,
+          "end_frame": 186
+        },
+        {
+          "name": "转职技能3",
+          "frame": 187,
+          "end_frame": 207
+        },
+        {
+          "name": "转职技能4",
+          "frame": 208,
+          "end_frame": 258
+        },
+        {
+          "name": "技能1",
+          "frame": 259,
+          "end_frame": 277
+        },
+        {
+          "name": "技能4",
+          "frame": 278,
+          "end_frame": 323
+        },
+        {
+          "name": "技能3",
+          "frame": 324,
+          "end_frame": 359
+        },
+        {
+          "name": "技能2",
+          "frame": 360,
+          "end_frame": 399
+        },
+        {
+          "name": "怪物技能",
+          "frame": 400,
+          "end_frame": 413
+        }
+      ]
+    }
+  }
+}
