@@ -33,6 +33,7 @@ class OriginalCharacterVisual:
     FPS = 30  # The original game advances its MovieClips at 30 frames per second.
     FRAME_COUNT = 413
     FIXED_SPRITE_DIR = ROOT / "python_assets" / "player0_fixed_frames"
+    HEADLESS_SPRITE_DIR = ROOT / "python_assets" / "player0_headless_frames"
     ORIGINAL_SPRITE_DIR = (
         ROOT / "playermc_x0_v940" / "sprites" / "DefineSprite_248_src.Skin.Skin_player0"
     )
@@ -101,6 +102,7 @@ class OriginalCharacterVisual:
         self.body_origin_x = 408.85
         self.body_origin_y = 218.65
         self.s4_costume_frames = []
+        self.s4_body_frames = []
         self.s4_origin_x = 421.75
         self.s4_origin_y = 182.05
         self.costume_index = 0
@@ -169,6 +171,8 @@ class OriginalCharacterVisual:
             return
         if not has_complete_frame_set(self.S4_COSTUME_DIR, timeline["frame_count"]):
             return
+        if not has_complete_frame_set(self.HEADLESS_SPRITE_DIR, len(self.frames)):
+            return
         actions = {
             label["name"]: (label["frame"], label["end_frame"])
             for label in timeline["labels"]
@@ -178,6 +182,9 @@ class OriginalCharacterVisual:
         self.s4_origin_x, self.s4_origin_y = timeline["registration_point"]
         self.s4_costume_frames = self._load_cropped_frames(
             self.S4_COSTUME_DIR, timeline["frame_count"]
+        )
+        self.s4_body_frames = self._load_cropped_frames(
+            self.HEADLESS_SPRITE_DIR, len(self.frames)
         )
 
     @staticmethod
@@ -354,7 +361,8 @@ class OriginalCharacterVisual:
     def draw(self, screen, world_x, world_bottom, facing):
         if not self.available:
             return False
-        surface, box = self.frames[self.frame - 1]
+        body_frames = self.s4_body_frames if self.costume_index else self.frames
+        surface, box = body_frames[self.frame - 1]
         if surface is None:
             return True
         left, top, right, _bottom = box
