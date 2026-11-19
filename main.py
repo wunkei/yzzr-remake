@@ -30,8 +30,8 @@ class OriginalCharacterVisual:
         1235: ROOT / "python_assets" / "weapon_layers" / "gold9_sword",
     }
     WEAPONS = (
-        (1108, "DefineSprite_1904_剑金11"),
         (1235, "DefineSprite_1681_剑金9"),
+        (1108, "DefineSprite_1904_剑金11"),
         (1168, "DefineSprite_1235_剑蓝1"),
         (1044, "DefineSprite_1044_剑蓝4"),
     )
@@ -174,7 +174,9 @@ class OriginalCharacterVisual:
                         image.subsurface(rect).copy(),
                         (rect.left, rect.top, rect.right, rect.bottom),
                     )
-        self.weapon_sword_frames = sword_frames
+            self.weapon_sword_frames = sword_frames
+        else:
+            self.weapon_sword_frames = []
 
     def cycle_weapon(self):
         if self.available:
@@ -250,8 +252,9 @@ class OriginalCharacterVisual:
                 weapon_y = round(world_bottom - self.anchor_y + weapon_top + register_y + self.weapon_offset[1])
                 screen.blit(weapon, (weapon_x, weapon_y))
             if self.frame in range(47, 79) and self.weapon_sword_frames:
-                sword_layer, sword_box = self.weapon_sword_frames[self.frame - 1]
-                if sword_layer is not None:
+                entry = self.weapon_sword_frames[self.frame - 1]
+                if entry is not None:
+                    sword_layer, sword_box = entry
                     sword_left, sword_top, sword_right, _sword_bottom = sword_box
                     if facing > 0:
                         sword_layer = pygame.transform.flip(sword_layer, True, False)
