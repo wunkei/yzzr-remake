@@ -1,4 +1,6 @@
-"""Find the exported child-clip offset by matching an embedded head frame."""
+"""Calibrate and verify child-clip head registration coordinates using Flash geometry."""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -12,53 +14,48 @@ BODY = ROOT / "playermc_x0_v940/sprites/DefineSprite_248_src.Skin.Skin_player0/1
 HEAD = ROOT / "playermc_x0_v940/sprites/DefineSprite_82_src.Head/1.png"
 TIMELINE = ROOT / "python_assets/player0_head_timeline.json"
 
+# Ground-truth Flash registration coordinates derived from SWF DefineSprite bounds:
+# DefineSprite 82 (Head): x_min = -44.3, y_min = -115.65 -> origin (44.3, 115.65)
+# DefineSprite 248 (Skin): x_min = -408.85, y_min = -218.65 -> origin (408.85, 218.65)
+OX_HEAD = 44.3
+OY_HEAD = 115.65
+OX_SKIN = 408.85
+OY_SKIN = 218.65
+
 
 def main():
     body = np.asarray(Image.open(BODY).convert("RGBA"))
     source = Image.open(HEAD).convert("RGBA")
     matrix = json.loads(TIMELINE.read_text(encoding="utf-8"))["frames"][0]
-    sx, sy = matrix["scale"]
-    skew_x, skew_y = matrix["rotate"]
+    a, d = matrix["scale"]
+    b, c = matrix["rotate"]
     tx, ty = matrix["translate"]
-    det = sx * sy - skew_x * skew_y
+    det = a * d - b * c
 
-    def score(offset_x, offset_y):
-        a, c = sx, skew_x
-        b, d = skew_y, sy
-        x0, y0 = tx + offset_x, ty + offset_y
-        inverse = (
-            d / det,
-            -c / det,
-            (c * y0 - d * x0) / det,
-            -b / det,
-            a / det,
-            (b * x0 - a * y0) / det,
-        )
-        rendered = source.transform(
-            (body.shape[1], body.shape[0]),
-            Image.Transform.AFFINE,
-            inverse,
-            resample=Image.Resampling.BICUBIC,
-        )
-        pixels = np.asarray(rendered)
-        mask = (pixels[:, :, 3] > 150) & (body[:, :, 3] > 0)
-        if not np.any(mask):
-            return float("inf")
-        delta = np.abs(pixels[:, :, :3].astype(np.int16) - body[:, :, :3].astype(np.int16))
-        return float(delta[mask].mean())
+    x0 = tx + OX_SKIN - a * OX_HEAD - c * OY_HEAD
+    y0 = ty + OY_SKIN - b * OX_HEAD - d * OY_HEAD
 
-    coarse = sorted(
-        (score(x, y), x, y)
-        for x in range(360, 441, 4)
-        for y in range(136, 205, 4)
-    )[:8]
-    candidates = [
-        (score(x / 2, y / 2), x / 2, y / 2)
-        for _, best_x, best_y in coarse[:3]
-        for x in range(int(best_x * 2 - 8), int(best_x * 2 + 9))
-        for y in range(int(best_y * 2 - 8), int(best_y * 2 + 9))
-    ]
-    print(sorted(candidates)[:12])
+    inv = (
+        d / det,
+        -c / det,
+        (c * y0 - d * x0) / det,
+        -b / det,
+        a / det,
+        (b * x0 - a * y0) / det,
+    )
+    rendered = source.transform(
+        (body.shape[1], body.shape[0]),
+        Image.Transform.AFFINE,
+        inv,
+        resample=Image.Resampling.BICUBIC,
+    )
+    pixels = np.asarray(rendered)
+    mask = (pixels[:, :, 3] > 180) & (body[:, :, 3] > 180)
+    overlap = int(np.sum(mask))
+    diff = float(np.abs(pixels[mask, :3].astype(float) - body[mask, :3].astype(float)).mean())
+    print(f"Ground-truth calibration verification:")
+    print(f"Overlap pixels: {overlap}")
+    print(f"Mean RGB diff: {diff:.2f}")
 
 
 if __name__ == "__main__":

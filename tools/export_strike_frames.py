@@ -108,7 +108,9 @@ WEAPON_SCALE = 1.00             # 尺寸缩放
 PARENT_DIR = ROOT / "WuQi_X0_v1905" / "sprites" / "DefineSprite_1681_剑金9"
 MATTE_DIR = ROOT / "python_assets" / "weapon_matte_cache" / "DefineSprite_1681_剑金9"
 LAYERS_DIR = ROOT / "python_assets" / "weapon_layers" / "gold9_sword"
-PLAYER_DIR = ROOT / "playermc_x0_v940" / "sprites" / "DefineSprite_248_src.Skin.Skin_player0"
+FIXED_PLAYER_DIR = ROOT / "python_assets" / "player0_fixed_frames"
+ORIGINAL_PLAYER_DIR = ROOT / "playermc_x0_v940" / "sprites" / "DefineSprite_248_src.Skin.Skin_player0"
+PLAYER_DIR = FIXED_PLAYER_DIR if FIXED_PLAYER_DIR.is_dir() and any(FIXED_PLAYER_DIR.glob("*.png")) else ORIGINAL_PLAYER_DIR
 OUTPUT_DIR = ROOT / "python_assets" / "attack_review_frames"
 
 DEFAULT_REVIEW_FRAMES = [
