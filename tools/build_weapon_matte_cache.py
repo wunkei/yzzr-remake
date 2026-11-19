@@ -17,9 +17,15 @@ CACHE_ROOT = ROOT / "python_assets" / "weapon_matte_cache"
 OPAQUE_BLACK_LIMIT = 10
 MATTE_PIXEL_THRESHOLD = 5_000
 ATTACK_FRAME_RANGE = range(47, 79)
+TARGETED_MATTE_RANGES = {
+    "DefineSprite_1681_剑金9": (range(79, 90),),
+}
 
 
-def make_black_matte_transparent(image: Image.Image) -> tuple[Image.Image, int]:
+def make_black_matte_transparent(
+    image: Image.Image,
+    minimum_matte_pixels: int = MATTE_PIXEL_THRESHOLD,
+) -> tuple[Image.Image, int]:
     if image.mode != "RGBA":
         image = image.convert("RGBA")
     pixels = image.load()
@@ -35,7 +41,7 @@ def make_black_matte_transparent(image: Image.Image) -> tuple[Image.Image, int]:
             if alpha > 0 and max(r, g, b) < OPAQUE_BLACK_LIMIT:
                 matte_pixels += 1
 
-    if matte_pixels < MATTE_PIXEL_THRESHOLD:
+    if matte_pixels < minimum_matte_pixels:
         return image, 0
 
     # Convert a black matte to alpha and unpremultiply the remaining colors.
@@ -71,6 +77,18 @@ def main():
                 continue
             image.save(output_dir / frame_path.name, optimize=True)
             corrected += 1
+        for frame_range in TARGETED_MATTE_RANGES.get(sprite_name, ()):
+            for frame_number in frame_range:
+                frame_path = source_dir / f"{frame_number}.png"
+                image = Image.open(frame_path).convert("RGBA")
+                image, matte_pixels = make_black_matte_transparent(
+                    image,
+                    minimum_matte_pixels=1,
+                )
+                if not matte_pixels:
+                    continue
+                image.save(output_dir / frame_path.name, optimize=True)
+                corrected += 1
         print(f"{sprite_name}: wrote corrected frames to {output_dir}")
     print(f"Wrote {corrected} matte-corrected frames")
 
