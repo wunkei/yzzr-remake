@@ -399,6 +399,10 @@ class Player:
         if self.on_ground:
             self.vy = -670
             self.on_ground = False
+            # Match the SWF's KeyControl, which calls SkinPlay("跳") as soon
+            # as a jump starts instead of waiting for the next movement tick.
+            if self.visual:
+                self.visual.play("跳", loop=True, force=True)
 
     def attack(self):
         if self.attack_cd <= 0 and self.hurt_timer <= 0:
