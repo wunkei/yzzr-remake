@@ -20,3 +20,5 @@ DataX_v1920/
 Thumbs.db
 .vscode/
 .idea/
+
+.build/

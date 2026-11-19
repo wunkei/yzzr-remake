@@ -163,7 +163,18 @@ def main():
     origin_frames = sorted(EXPORT_ORIGINS)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     written = 0
+    matte_dir = ROOT / "python_assets" / "weapon_matte_cache" / "DefineSprite_1681_剑金9"
     for frame in range(47, 79):
+        matte_path = matte_dir / f"{frame}.png"
+        target_file = args.output_dir / f"{frame}.png"
+        if not matte_path.exists():
+            if target_file.is_file():
+                try:
+                    target_file.unlink()
+                except Exception:
+                    pass
+            continue
+
         matrix = matrices.get(frame)
         if matrix is None:
             continue

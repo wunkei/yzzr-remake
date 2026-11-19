@@ -41,23 +41,29 @@ sys.path.insert(0, str(ROOT / "tools"))
 #       dy > 0 向下移，dy < 0 向上移。
 # ==============================================================================
 FRAME_TUNING = {
-    # ---------------- 攻击 1：下劈动作 ----------------
-    50: {"rot": -11.0, "dx": 0.0, "dy": 0.0},  # 攻击1 下劈击中帧 (初始角度偏约 -11度)
-    54: {"rot": -10.0,  "dx": 0.0, "dy": 0.0},  # 攻击1 下劈收招最后一帧 (初始角度偏约 -5度)
+    # ---------------- 攻击 1：下劈动作 (有黑底挥砍弧光，叠加独立剑身) ----------------
+    50: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},  # 攻击1 下劈击中帧
+    51: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    52: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    53: {"rot": -4.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    54: {"rot": -4.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},  # 攻击1 下劈收招最后一帧
 
     # ---------------- 攻击 2：下劈 -> 上挑动作 ----------------
-    55: {"rot": 7.0,   "pivot": (593.0, 1137.0), "dx": 0.0, "dy": 0.0},  # 攻击2 下劈起手帧
-    56: {"rot": 7.0,   "pivot": (593.0, 1137.0), "dx": 0.0, "dy": 0.0},  # 攻击2 下劈收招最后一帧
-    57: {"rot": -8.0,  "pivot": (488.0, 1094.0), "dx": 0.0, "dy": 0.0},  # 攻击2 上挑击中帧
+    # 注：55、56 帧为过渡原画，本身干净透明无黑底，自动使用原画，不叠加双层
+    57: {"rot": -8.0, "pivot": (488.0, 1094.0), "dx": 0.0, "dy": 0.0},  # 攻击2 上挑击中帧
 
     # ---------------- 攻击 3：突刺动作 ----------------
-    63: {"rot": 0.0,   "dx": 0.0, "dy": 0.0},  # 攻击3 突刺起手
-    65: {"rot": 0.0,   "dx": 0.0, "dy": 0.0},  # 攻击3 刺出帧
+    63: {"rot": 0.0, "dx": 0.0, "dy": 0.0},
+    65: {"rot": 0.0, "dx": 0.0, "dy": 0.0},
 
-    # ---------------- 攻击 4：重劈动作 ----------------
-    71: {"rot": -8.0,  "pivot": (586.0, 1096.0), "dx": 0.0, "dy": 0.0},  # 攻击4 重劈高举蓄力
-    73: {"rot": -11.0, "dx": 0.0, "dy": 0.0},  # 攻击4 重劈击中地表帧 (初始角度偏约 -19度)
-    78: {"rot": -8.0,  "dx": 0.0, "dy": 0.0},  # 攻击4 重劈收招最后一帧 (初始角度偏约 -4度)
+    # ---------------- 攻击 4：重劈动作 (有黑底挥砍弧光，叠加独立剑身) ----------------
+    # 注：71、72 帧为高举蓄力原画，本身干净透明无黑底，自动使用原画
+    73: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},  # 攻击4 重劈击中地表帧
+    74: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    75: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    76: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    77: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},
+    78: {"rot": -5.0, "pivot": (507.0, 1127.0), "dx": 0.0, "dy": 0.0},  # 攻击4 重劈收招最后一帧
 }
 
 # ------------------------------------------------------------------------------
@@ -108,8 +114,8 @@ OUTPUT_DIR = ROOT / "python_assets" / "attack_review_frames"
 DEFAULT_REVIEW_FRAMES = [
     (50, "攻击1_下劈_击中帧"),
     (54, "攻击1_下劈_最后一帧"),
-    (55, "攻击2_下劈_起手帧"),
-    (56, "攻击2_下劈_最后一帧"),
+    (55, "攻击2_起手_纯净原画"),
+    (56, "攻击2_过渡_纯净原画"),
     (73, "攻击4_重劈_击中帧"),
     (78, "攻击4_重劈_最后一帧"),
 ]
@@ -152,6 +158,18 @@ def rebuild_gold9_sword_layers(target_dir: Path = LAYERS_DIR):
     count = 0
 
     for frame in range(47, 79):
+        # 只有在原本存在黑底挥砍特效(有黑底需去黑)的帧，才需要叠加独立剑身图层
+        # 对于本身就是干净透明原画的过渡/起手帧(如47-49, 55-56, 63-72)，直接呈现原画，严禁叠加双层！
+        matte_path = MATTE_DIR / f"{frame}.png"
+        target_file = target_dir / f"{frame}.png"
+        if not matte_path.exists():
+            if target_file.is_file():
+                try:
+                    target_file.unlink()
+                except Exception:
+                    pass
+            continue
+
         matrix = matrices.get(frame)
         if matrix is None:
             continue
@@ -179,13 +197,8 @@ def rebuild_gold9_sword_layers(target_dir: Path = LAYERS_DIR):
         pivot = tuning.get("pivot", None)
         if rot is not None and rot != 0.0:
             if pivot is None:
-                # 自动计算该帧剑身自身质心作为旋转轴心，方便用户直接改角度
-                alpha = np.array(layer.getchannel("A"))
-                ys, xs = np.where(alpha > 40)
-                if len(xs) > 0:
-                    pivot = (float(xs.mean()), float(ys.mean()))
-                else:
-                    pivot = (layer.width / 2.0, layer.height / 2.0)
+                # 默认使用握手处/剑柄基准作为支点自转，保证剑柄在手心中不移位
+                pivot = (507.0, 1127.0)
             layer = layer.rotate(
                 rot,
                 resample=Image.Resampling.BICUBIC,
@@ -234,22 +247,30 @@ def export_frame_review(frame_num: int, label: str, output_dir: Path):
         p1.alpha_composite(raw_im.crop(crop_box))
         sheet.paste(p1.resize((w_panel_w, w_panel_h)), (0, 40))
 
+    tuning = FRAME_TUNING.get(frame_num, {})
+    curr_rot = tuning.get("rot", "原画")
     if layer_im:
         p2 = Image.new("RGBA", (w_crop_w, w_crop_h), "#18213b")
         p2.alpha_composite(layer_im.crop(crop_box))
         sheet.paste(p2.resize((w_panel_w, w_panel_h)), (w_panel_w, 40))
 
-    if raw_im and layer_im:
-        p3 = Image.new("RGBA", (w_crop_w, w_crop_h), "#18213b")
-        p3.alpha_composite(raw_im.crop(crop_box))
-        p3.alpha_composite(layer_im.crop(crop_box))
-        sheet.paste(p3.resize((w_panel_w, w_panel_h)), (w_panel_w * 2, 40))
+        if raw_im:
+            p3 = Image.new("RGBA", (w_crop_w, w_crop_h), "#18213b")
+            p3.alpha_composite(raw_im.crop(crop_box))
+            p3.alpha_composite(layer_im.crop(crop_box))
+            sheet.paste(p3.resize((w_panel_w, w_panel_h)), (w_panel_w * 2, 40))
 
-    tuning = FRAME_TUNING.get(frame_num, {})
-    curr_rot = tuning.get("rot", "默认")
-    draw.text((10, 8), f"第 {frame_num} 帧 · {label} · 去黑原图", fill="#ffffff", font=font)
-    draw.text((w_panel_w + 10, 8), f"独立剑身 (当前角度: {curr_rot}°)", fill="#ffd700", font=font)
-    draw.text((w_panel_w * 2 + 10, 8), "重叠效果 (原图 + 剑身)", fill="#00ffcc", font=font)
+        draw.text((10, 8), f"第 {frame_num} 帧 · {label} · 特效去黑图", fill="#ffffff", font=font)
+        draw.text((w_panel_w + 10, 8), f"独立剑身 (当前角度: {curr_rot}°)", fill="#ffd700", font=font)
+        draw.text((w_panel_w * 2 + 10, 8), "重叠效果 (原图 + 剑身)", fill="#00ffcc", font=font)
+    else:
+        # 该帧为本身干净的原画，无需叠层
+        if raw_im:
+            sheet.paste(p1.resize((w_panel_w, w_panel_h)), (w_panel_w, 40))
+            sheet.paste(p1.resize((w_panel_w, w_panel_h)), (w_panel_w * 2, 40))
+        draw.text((10, 8), f"第 {frame_num} 帧 · {label} · 纯净原图", fill="#ffffff", font=font)
+        draw.text((w_panel_w + 10, 8), "原生原画 (无需叠层)", fill="#ffd700", font=font)
+        draw.text((w_panel_w * 2 + 10, 8), "最终效果 (单层无重影)", fill="#00ffcc", font=font)
 
     layer_review_path = output_dir / f"frame_{frame_num}_{label}_weapon_layer.png"
     safe_save(sheet, layer_review_path)
