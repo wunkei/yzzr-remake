@@ -13,6 +13,7 @@ FPS = 60
 WORLD_WIDTH = 2600
 GROUND_Y = 448
 GRAVITY = 1850
+DOUBLE_TAP_WINDOW = 0.30
 
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -312,6 +313,9 @@ def clamp(value, low, high):
 
 
 class Player:
+    LEFT_KEYS = (pygame.K_a, pygame.K_LEFT)
+    RIGHT_KEYS = (pygame.K_d, pygame.K_RIGHT)
+
     def __init__(self, visual=None):
         self.rect = pygame.Rect(120, GROUND_Y - 76, 42, 76)
         self.x = float(self.rect.x)
@@ -332,12 +336,33 @@ class Player:
         self.xp = 0
         self.combo = 0
         self.visual = visual
+        self.last_direction_tap = {}
+        self.dash_key = None
+        self.is_dashing = False
+        self.run_attack_timer = 0.0
+
+    def direction_key_down(self, key, now):
+        if key not in self.LEFT_KEYS + self.RIGHT_KEYS:
+            return
+        previous = self.last_direction_tap.get(key)
+        if previous is not None and now - previous <= DOUBLE_TAP_WINDOW:
+            self.dash_key = key
+            self.is_dashing = True
+        self.last_direction_tap[key] = now
+
+    def direction_key_up(self, key):
+        if key == self.dash_key:
+            self.dash_key = None
+            self.is_dashing = False
 
     def update(self, dt, keys):
         direction = int(keys[pygame.K_d] or keys[pygame.K_RIGHT]) - int(
             keys[pygame.K_a] or keys[pygame.K_LEFT]
         )
-        speed = 340 if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]) else 255
+        dash_held = self.dash_key is not None and keys[self.dash_key]
+        self.is_dashing = bool(dash_held and direction)
+        sprinting = self.is_dashing or keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
+        speed = 382.5 if self.is_dashing else (340 if sprinting else 255)
         if self.hurt_timer > 0:
             self.hurt_timer = max(0, self.hurt_timer - dt)
             self.vx *= max(0, 1 - 4 * dt)
@@ -360,12 +385,13 @@ class Player:
             if not self.on_ground:
                 self.visual.request("跳")
             elif direction:
-                self.visual.request("跑" if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]) else "走")
+                self.visual.request("跑" if sprinting else "走")
             else:
                 self.visual.request("站")
             self.visual.update(dt)
         self.attack_cd = max(0, self.attack_cd - dt)
         self.attack_timer = max(0, self.attack_timer - dt)
+        self.run_attack_timer = max(0, self.run_attack_timer - dt)
         self.skill_cd = max(0, self.skill_cd - dt)
         self.invincible = max(0, self.invincible - dt)
 
@@ -379,16 +405,24 @@ class Player:
             self.attack_cd = 0.34
             self.attack_timer = 0.19
             self.combo = self.combo % 4 + 1
+            run_attack = self.is_dashing and self.on_ground
+            if run_attack:
+                self.attack_cd = 0.48
+                self.attack_timer = 0.24
+                self.run_attack_timer = 0.24
             if self.visual:
-                self.visual.play(f"攻击{self.combo}", loop=False, force=True)
-            return self.attack_box()
+                action = "跑攻" if run_attack else f"攻击{self.combo}"
+                self.visual.play(action, loop=False, force=True)
+            return self.attack_box(run_attack), run_attack
         return None
 
-    def attack_box(self):
-        width = 76
+    def attack_box(self, run_attack=False):
+        width = 118 if run_attack else 76
+        height = 56 if run_attack else 48
+        top = self.rect.y + (7 if run_attack else 12)
         if self.facing > 0:
-            return pygame.Rect(self.rect.right - 3, self.rect.y + 12, width, 48)
-        return pygame.Rect(self.rect.left - width + 3, self.rect.y + 12, width, 48)
+            return pygame.Rect(self.rect.right - 3, top, width, height)
+        return pygame.Rect(self.rect.left - width + 3, top, width, height)
 
     def take_hit(self, damage, source_x):
         if self.invincible > 0:
@@ -483,12 +517,18 @@ class Game:
             if key == pygame.K_r:
                 self.reset()
             return
+        if key in Player.LEFT_KEYS + Player.RIGHT_KEYS:
+            p.direction_key_down(key, pygame.time.get_ticks() / 1000.0)
+            return
         if key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
             p.jump()
         elif key in (pygame.K_j, pygame.K_z):
-            box = p.attack()
-            if box:
+            attack = p.attack()
+            if attack:
+                box, run_attack = attack
                 damage = 17 + (p.level - 1) * 3 + p.combo * 2
+                if run_attack:
+                    damage = round(damage * 1.5)
                 for enemy in self.enemies:
                     if box.colliderect(enemy.rect):
                         enemy.take_hit(damage, p.rect.centerx)
@@ -566,7 +606,7 @@ class Game:
         pygame.draw.rect(self.screen, (38, 45, 70), (x + 6, y + 61, 12, 15), border_radius=4)
         pygame.draw.rect(self.screen, (38, 45, 70), (x + 24, y + 61, 12, 15), border_radius=4)
         if p.attack_timer > 0:
-            box = p.attack_box()
+            box = p.attack_box(run_attack=p.run_attack_timer > 0)
             sx = box.x - camera
             pygame.draw.arc(self.screen, (244, 222, 137), (sx, box.y - 5, box.width, box.height + 10), 0.2, 2.9, 5)
 
@@ -607,7 +647,7 @@ class Game:
         self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
         self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
         self.screen.blit(self.font.render(f"关卡 {self.wave}/3", True, WHITE), (WIDTH - 112, 22))
-        controls = "A/D 或 ←/→ 移动   Shift 冲刺   Space 跳跃   J/Z 普攻   K/X 技能   V 换剑"
+        controls = "双击 A/D 或方向键冲刺   冲刺中 J/Z 跑攻   Shift 加速   Space 跳跃   K/X 技能   V 换剑"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
         if self.game_over or self.victory:
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -630,8 +670,10 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
-                    else:
+                    elif not getattr(event, "repeat", False):
                         self.handle_key(event.key)
+                elif event.type == pygame.KEYUP:
+                    self.player.direction_key_up(event.key)
             self.update(dt)
             self.draw()
         pygame.quit()
