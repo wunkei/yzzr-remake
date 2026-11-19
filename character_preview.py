@@ -41,8 +41,16 @@ def main():
                     vertical_speed = JUMP_SPEED
                     on_ground = False
                 elif event.key in (pygame.K_j, pygame.K_z):
-                    attack_number = attack_number % 4 + 1
-                    visual.play(f"攻击{attack_number}", loop=False, force=True)
+                    keys = pygame.key.get_pressed()
+                    if keys[pygame.K_w] or keys[pygame.K_UP]:
+                        visual.play("上挑", loop=False, force=True)
+                    elif keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                        visual.play("下斩", loop=False, force=True)
+                    elif not on_ground:
+                        visual.play("攻击1", loop=False, force=True)
+                    else:
+                        attack_number = attack_number % 4 + 1
+                        visual.play(f"攻击{attack_number}", loop=False, force=True)
                     attack_cooldown = 0.34
                 elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
                     attack_number = event.key - pygame.K_0
@@ -94,7 +102,7 @@ def main():
         visual.draw(screen, x, bottom, facing)
 
         hint = pygame.font.Font(None, 21).render(
-            "A/D 移动  Shift 跑  Space 跳  J/Z 攻击  1-4 动作  V 换剑  C 换装  B 背景  R 归中  Esc 退出",
+            "A/D 移动  Shift 跑  Space 跳  W/S+J 上挑/下斩  J/Z 攻击  1-4 动作  V 换剑  C 换装  B 背景  R 归中  Esc 退出",
             True,
             hint_color,
         )

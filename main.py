@@ -523,31 +523,54 @@ class Player:
             if self.visual:
                 self.visual.play("跳", loop=True, force=True)
 
-    def attack(self):
+    def attack(self, held_keys=None):
         if self.attack_cd <= 0 and self.hurt_timer <= 0:
             self.attack_cd = 0.34
             self.attack_timer = 0.19
             self.combo = self.combo % 4 + 1
             run_attack = self.is_dashing and self.on_ground
+            attack_kind = "normal"
             if run_attack:
                 self.attack_cd = 0.48
                 self.attack_timer = 0.24
                 self.run_attack_timer = 0.24
                 self.combo = 0
+                attack_kind = "run"
+            else:
+                held_keys = held_keys or pygame.key.get_pressed()
+                if held_keys[pygame.K_w] or held_keys[pygame.K_UP]:
+                    attack_kind = "up"
+                elif held_keys[pygame.K_s] or held_keys[pygame.K_DOWN]:
+                    attack_kind = "down"
+                elif not self.on_ground:
+                    attack_kind = "air"
+            self.last_attack_kind = attack_kind
             if self.visual:
-                action = "跑攻" if run_attack else f"攻击{self.combo}"
+                action = {
+                    "run": "跑攻",
+                    "up": "上挑",
+                    "down": "下斩",
+                    "air": "攻击1",
+                }.get(attack_kind, f"攻击{self.combo}")
                 self.visual.play(action, loop=False, force=True)
             if self.is_dashing:
                 self.dash_key = None
                 self.is_dashing = False
                 self.last_direction_tap.clear()
-            return self.attack_box(run_attack), run_attack
+            return self.attack_box(run_attack, attack_kind), run_attack
         return None
 
-    def attack_box(self, run_attack=False):
-        width = 118 if run_attack else 76
-        height = 56 if run_attack else 48
-        top = self.rect.y + (7 if run_attack else 12)
+    def attack_box(self, run_attack=False, attack_kind="normal"):
+        if attack_kind == "up":
+            width, height = 88, 86
+            top = self.rect.y - 39
+        elif attack_kind == "down":
+            width, height = 88, 78
+            top = self.rect.y + 28
+        else:
+            width = 118 if run_attack else 76
+            height = 56 if run_attack else 48
+            top = self.rect.y + (7 if run_attack else 12)
         if self.facing > 0:
             return pygame.Rect(self.rect.right - 3, top, width, height)
         return pygame.Rect(self.rect.left - width + 3, top, width, height)
@@ -655,7 +678,7 @@ class Game:
         if key == pygame.K_k:
             p.jump()
         elif key in (pygame.K_j, pygame.K_z):
-            attack = p.attack()
+            attack = p.attack(pygame.key.get_pressed())
             if attack:
                 box, run_attack = attack
                 damage = 17 + (p.level - 1) * 3 + p.combo * 2
