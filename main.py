@@ -366,6 +366,8 @@ class Player:
         if self.hurt_timer > 0:
             self.hurt_timer = max(0, self.hurt_timer - dt)
             self.vx *= max(0, 1 - 4 * dt)
+        elif self.run_attack_timer > 0:
+            self.vx = self.facing * 382.5
         else:
             self.vx = direction * speed
         if direction:
@@ -414,9 +416,14 @@ class Player:
                 self.attack_cd = 0.48
                 self.attack_timer = 0.24
                 self.run_attack_timer = 0.24
+                self.combo = 0
             if self.visual:
                 action = "跑攻" if run_attack else f"攻击{self.combo}"
                 self.visual.play(action, loop=False, force=True)
+            if self.is_dashing:
+                self.dash_key = None
+                self.is_dashing = False
+                self.last_direction_tap.clear()
             return self.attack_box(run_attack), run_attack
         return None
 
@@ -431,6 +438,10 @@ class Player:
     def take_hit(self, damage, source_x):
         if self.invincible > 0:
             return
+        if self.is_dashing:
+            self.dash_key = None
+            self.is_dashing = False
+            self.last_direction_tap.clear()
         self.hp = max(0, self.hp - damage)
         self.invincible = 0.65
         self.hurt_timer = 0.18
@@ -539,6 +550,10 @@ class Game:
         elif key in (pygame.K_k, pygame.K_x) and p.skill_cd <= 0 and p.mp >= 15:
             p.mp -= 15
             p.skill_cd = 0.65
+            if p.is_dashing:
+                p.dash_key = None
+                p.is_dashing = False
+                p.last_direction_tap.clear()
             self.bolts.append(Bolt(p.rect.centerx + p.facing * 24, p.rect.centery - 7, p.facing))
         elif key == pygame.K_v and p.visual:
             p.visual.cycle_weapon()
