@@ -19,6 +19,13 @@ WHITE = (241, 245, 255)
 ROOT = Path(__file__).resolve().parent
 
 
+def has_complete_frame_set(directory, frame_count):
+    return directory.is_dir() and all(
+        (directory / f"{frame}.png").is_file()
+        for frame in range(1, frame_count + 1)
+    )
+
+
 class OriginalCharacterVisual:
     """Play the original base-character SWF frames using their registered pivot."""
 
@@ -30,8 +37,7 @@ class OriginalCharacterVisual:
     )
     SPRITE_DIR = (
         FIXED_SPRITE_DIR
-        if FIXED_SPRITE_DIR.is_dir()
-        and all((FIXED_SPRITE_DIR / f"{frame}.png").is_file() for frame in range(1, FRAME_COUNT + 1))
+        if has_complete_frame_set(FIXED_SPRITE_DIR, FRAME_COUNT)
         else ORIGINAL_SPRITE_DIR
     )
     TIMELINE_FILE = ROOT / "python_assets" / "player0_timeline.json"
