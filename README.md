@@ -4,7 +4,7 @@
 
 原版角色和武器各有 413 帧，动作标签与帧区间一致，来自 `PlayerMc_X0_v940.swf` 和 `WuQi_X0_v1905.swf`。`tools/extract_swf_timeline.py` 用于生成 `python_assets` 下的时间轴索引。角色使用固定脚底锚点，武器根据站立帧里的手柄注册到手部；动作播放时复用相同帧号。
 
-原版还会用 `Head` 子图层和 `headFrame` 固定当前发型。`python_assets/player0_head_timeline.json` 已提取出头部子图层的逐帧变换；`tools/build_player_fixed_frames.py` 将固定发型合成进 413 帧角色图。为避免头发替换后颈部出现透明缝隙，旧头部清理遮罩保持原位，只将新头部向下微调 2 个源像素，让头颈有轻微重叠。运行 `python tools/build_player_fixed_frames.py --force` 可重建角色帧。X0 默认白甲逐帧图位于 `python_assets/player_default_armor_frames/`，注册点和动作标签记录在 `python_assets/default_armor_timeline.json`；盔甲保留原版独立时间轴，并按人物动作切换与循环。
+原版还会用 `Head` 子图层和 `headFrame` 固定当前发型。`python_assets/player0_head_timeline.json` 已提取出头部子图层的逐帧变换；`tools/build_player_fixed_frames.py` 将固定发型合成进 413 帧角色图。为避免头发替换后颈部出现透明缝隙，旧头部清理遮罩保持原位，只将新头部向下微调 2 个源像素，让头颈有轻微重叠。运行 `python tools/build_player_fixed_frames.py --force` 可重建角色帧。X0 默认白甲逐帧图位于 `python_assets/player_default_armor_frames/`，S4 时装位于 `python_assets/player_s4_costume_frames/`；对应注册点和动作标签记录在各自的时间轴 JSON 文件中，按 `C` 可切换。
 
 ## 启动
 
@@ -30,10 +30,12 @@ python character_preview.py
 - `Space`、`W` 或 `↑`：跳跃
 - `J` 或 `Z`：近战攻击
 - `K` 或 `X`：消耗法力发射技能
+- `C`：切换默认白甲与 S4 时装
+- `V`：切换四把原版武器
 - `R`：在胜负结算后重新开始
 - `Esc`：退出
 
-人物预览里也可用 `1`–`4` 直接查看四段攻击动作，`V` 切换武器，`B` 在白底与深色背景间切换（深色背景便于观察相加混合特效），`R` 把人物移回画面中央。
+人物预览里也可用 `1`–`4` 直接查看四段攻击动作，`V` 切换武器，`C` 切换默认白甲与 S4 时装，`B` 在白底与深色背景间切换（深色背景便于观察相加混合特效），`R` 把人物移回画面中央。
 
 ## 武器位置与帧图
 

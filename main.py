@@ -44,6 +44,8 @@ class OriginalCharacterVisual:
     TIMELINE_FILE = ROOT / "python_assets" / "player0_timeline.json"
     DEFAULT_ARMOR_DIR = ROOT / "python_assets" / "player_default_armor_frames"
     DEFAULT_ARMOR_TIMELINE = ROOT / "python_assets" / "default_armor_timeline.json"
+    S4_COSTUME_DIR = ROOT / "python_assets" / "player_s4_costume_frames"
+    S4_COSTUME_TIMELINE = ROOT / "python_assets" / "s4_costume_timeline.json"
     WEAPON_MANIFEST = ROOT / "python_assets" / "weapon_timelines.json"
     SWORD_LAYER_DIRS = {
         1235: ROOT / "python_assets" / "weapon_layers" / "gold9_sword",
@@ -98,6 +100,10 @@ class OriginalCharacterVisual:
         self.armor_origin_y = 97.9
         self.body_origin_x = 408.85
         self.body_origin_y = 218.65
+        self.s4_costume_frames = []
+        self.s4_origin_x = 421.75
+        self.s4_origin_y = 182.05
+        self.costume_index = 0
         self.weapon_frames = []
         self.weapon_sword_frames = []
         self.weapon_index = 0
@@ -129,6 +135,7 @@ class OriginalCharacterVisual:
             else:
                 self.frames.append((None, (0, 0, 0, 0)))
         self._load_default_armor()
+        self._load_s4_costume()
         self.available = bool(self.frames and self.actions)
         if self.available:
             self._load_weapon(0)
@@ -148,11 +155,44 @@ class OriginalCharacterVisual:
         }
         self.armor_origin_x, self.armor_origin_y = timeline["registration_point"]
         self.body_origin_x, self.body_origin_y = timeline["body_registration_point"]
-        self.armor_frames = [
-            pygame.image.load(str(self.DEFAULT_ARMOR_DIR / f"{frame}.png")).convert_alpha()
-            for frame in range(1, timeline["frame_count"] + 1)
-        ]
+        self.armor_frames = self._load_cropped_frames(
+            self.DEFAULT_ARMOR_DIR, timeline["frame_count"]
+        )
         self.armor_frame_count = len(self.armor_frames)
+
+    def _load_s4_costume(self):
+        if not self.S4_COSTUME_TIMELINE.exists():
+            return
+        with self.S4_COSTUME_TIMELINE.open("r", encoding="utf-8") as timeline_file:
+            timeline = json.load(timeline_file)
+        if timeline["frame_count"] != len(self.frames):
+            return
+        if not has_complete_frame_set(self.S4_COSTUME_DIR, timeline["frame_count"]):
+            return
+        actions = {
+            label["name"]: (label["frame"], label["end_frame"])
+            for label in timeline["labels"]
+        }
+        if actions != self.actions:
+            return
+        self.s4_origin_x, self.s4_origin_y = timeline["registration_point"]
+        self.s4_costume_frames = self._load_cropped_frames(
+            self.S4_COSTUME_DIR, timeline["frame_count"]
+        )
+
+    @staticmethod
+    def _load_cropped_frames(directory, frame_count):
+        frames = []
+        for frame in range(1, frame_count + 1):
+            image = pygame.image.load(str(directory / f"{frame}.png")).convert_alpha()
+            rect = image.get_bounding_rect(min_alpha=1)
+            if rect.width and rect.height:
+                frames.append(
+                    (image.subsurface(rect).copy(), (rect.left, rect.top, rect.right, rect.bottom))
+                )
+            else:
+                frames.append((None, (0, 0, 0, 0)))
+        return frames
 
     def _load_weapon(self, index):
         self.weapon_sword_frames = []
@@ -253,6 +293,10 @@ class OriginalCharacterVisual:
         if self.available:
             self._load_weapon((self.weapon_index + 1) % len(self.WEAPONS))
 
+    def cycle_costume(self):
+        if self.s4_costume_frames:
+            self.costume_index = (self.costume_index + 1) % 2
+
     def request(self, action):
         if action in self.actions:
             self.desired_action = action
@@ -299,7 +343,7 @@ class OriginalCharacterVisual:
                 break
             else:
                 self.frame = self.actions[self.action][0]
-            if self.armor_frames and self.armor_action in self.armor_actions:
+            if (self.armor_frames or self.s4_costume_frames) and self.armor_action in self.armor_actions:
                 body_looped = self.action == previous_action and self.loop and previous_frame == end_frame
                 if self.action != previous_action or body_looped:
                     self.armor_action = self.action
@@ -321,17 +365,27 @@ class OriginalCharacterVisual:
             draw_x = round(world_x - self.anchor_x + left)
         draw_y = round(world_bottom - self.anchor_y + top)
         screen.blit(surface, (draw_x, draw_y))
-        if self.armor_frames and self.armor_action in self.armor_actions:
-            armor = self.armor_frames[self.armor_frame - 1]
-            if facing > 0:
-                armor = pygame.transform.flip(armor, True, False)
-                armor_x = round(
-                    world_x + self.anchor_x - (self.body_origin_x - self.armor_origin_x + armor.get_width())
+        costume_frames = self.s4_costume_frames if self.costume_index else self.armor_frames
+        costume_origin_x = self.s4_origin_x if self.costume_index else self.armor_origin_x
+        costume_origin_y = self.s4_origin_y if self.costume_index else self.armor_origin_y
+        if costume_frames and self.armor_action in self.armor_actions:
+            armor, armor_box = costume_frames[self.armor_frame - 1]
+            if armor is not None:
+                armor_left, armor_top, armor_right, _armor_bottom = armor_box
+                if facing > 0:
+                    armor = pygame.transform.flip(armor, True, False)
+                    armor_x = round(
+                        world_x + self.anchor_x
+                        - (self.body_origin_x - costume_origin_x + armor_right)
+                    )
+                else:
+                    armor_x = round(
+                        world_x - self.anchor_x + self.body_origin_x - costume_origin_x + armor_left
+                    )
+                armor_y = round(
+                    world_bottom - self.anchor_y + self.body_origin_y - costume_origin_y + armor_top
                 )
-            else:
-                armor_x = round(world_x - self.anchor_x + self.body_origin_x - self.armor_origin_x)
-            armor_y = round(world_bottom - self.anchor_y + self.body_origin_y - self.armor_origin_y)
-            screen.blit(armor, (armor_x, armor_y))
+                screen.blit(armor, (armor_x, armor_y))
         if self.weapon_frames:
             weapon, weapon_box = self.weapon_frames[self.frame - 1]
             register_x, register_y = self.weapon_register
@@ -612,6 +666,8 @@ class Game:
             self.bolts.append(Bolt(p.rect.centerx + p.facing * 24, p.rect.centery - 7, p.facing))
         elif key == pygame.K_v and p.visual:
             p.visual.cycle_weapon()
+        elif key == pygame.K_c and p.visual:
+            p.visual.cycle_costume()
 
     def update(self, dt):
         if self.game_over or self.victory:
@@ -721,7 +777,7 @@ class Game:
         self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
         self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
         self.screen.blit(self.font.render(f"关卡 {self.wave}/3", True, WHITE), (WIDTH - 112, 22))
-        controls = "双击 A/D 或方向键冲刺   冲刺中 J/Z 跑攻   Shift 加速   Space 跳跃   K/X 技能   V 换剑"
+        controls = "双击 A/D 或方向键冲刺   冲刺中 J/Z 跑攻   Shift 加速   Space 跳跃   K/X 技能   V 换剑   C 换装"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
         if self.game_over or self.victory:
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
