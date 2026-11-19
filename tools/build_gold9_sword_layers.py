@@ -7,6 +7,7 @@ import struct
 from bisect import bisect_right
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 from extract_swf_head_timeline import read_matrix
@@ -25,8 +26,7 @@ try:
     from export_strike_frames import (
         EXPORT_ORIGINS,
         POSE_ROTATIONS,
-        PER_FRAME_OFFSETS,
-        PER_FRAME_ROTATIONS,
+        FRAME_TUNING,
         PRESERVE_SKEW_ORDER_SEGMENTS,
     )
 except ImportError:
@@ -45,8 +45,7 @@ except ImportError:
         57: (-8.0, (488.0, 1094.0)),
         71: (-8.0, (586.0, 1096.0)),
     }
-    PER_FRAME_OFFSETS = {}
-    PER_FRAME_ROTATIONS = {}
+    FRAME_TUNING = {}
     PRESERVE_SKEW_ORDER_SEGMENTS = {55}
 OUTPUT = ROOT / "python_assets" / "weapon_layers" / "gold9_sword"
 
@@ -170,7 +169,9 @@ def main():
             continue
         origin_frame = origin_frames[bisect_right(origin_frames, frame) - 1]
         origin_x, origin_y = EXPORT_ORIGINS[origin_frame]
-        fx, fy = PER_FRAME_OFFSETS.get(frame, (0.0, 0.0))
+        tuning = FRAME_TUNING.get(frame, {})
+        fx = tuning.get("dx", 0.0)
+        fy = tuning.get("dy", 0.0)
         final_ox = origin_x + args.origin_dx + fx
         final_oy = origin_y + args.origin_dy + fy
         layer = transformed_layer(
@@ -182,18 +183,27 @@ def main():
                 and origin_frame not in PRESERVE_SKEW_ORDER_SEGMENTS
             ),
         )
-        pose_start = origin_frame
-        if pose_start in POSE_ROTATIONS:
-            angle, pivot = POSE_ROTATIONS[pose_start]
+        rot = tuning.get("rot", None)
+        pivot = tuning.get("pivot", None)
+        if rot is not None and rot != 0.0:
+            if pivot is None:
+                alpha = np.array(layer.getchannel("A"))
+                ys, xs = np.where(alpha > 40)
+                if len(xs) > 0:
+                    pivot = (float(xs.mean()), float(ys.mean()))
+                else:
+                    pivot = (layer.width / 2.0, layer.height / 2.0)
             layer = layer.rotate(
-                angle,
+                rot,
                 resample=Image.Resampling.BICUBIC,
                 center=pivot,
             )
-        if frame in PER_FRAME_ROTATIONS and PER_FRAME_ROTATIONS[frame] != 0.0:
+        elif origin_frame in POSE_ROTATIONS:
+            angle, p_center = POSE_ROTATIONS[origin_frame]
             layer = layer.rotate(
-                PER_FRAME_ROTATIONS[frame],
+                angle,
                 resample=Image.Resampling.BICUBIC,
+                center=p_center,
             )
         layer.save(args.output_dir / f"{frame}.png", optimize=True)
         written += 1

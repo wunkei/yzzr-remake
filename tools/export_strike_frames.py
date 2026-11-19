@@ -3,11 +3,9 @@
 【用户可调重合参数集中配置中心】
 ================================================================================
 所有关于金剑9（DefineSprite_1681）在攻击动作中的：
-  1. 剑身图层对齐原点 (EXPORT_ORIGINS)
-  2. 动作段旋转角度与轴心 (POSE_ROTATIONS)
-  3. 单帧像素级微调偏移 (PER_FRAME_OFFSETS)
-  4. 单帧角度微调 (PER_FRAME_ROTATIONS)
-  5. 人物手部锚点与武器全局挂载位置 (WEAPON_HAND_ANCHOR / WEAPON_OFFSET)
+  1. 每一个单独帧的角度与位移 (FRAME_TUNING)  <-- 【核心修改区：直接改角度】
+  2. 动作段基准注册原点 (EXPORT_ORIGINS)
+  3. 人物手部锚点与武器全局挂载位置 (WEAPON_HAND_ANCHOR / WEAPON_OFFSET)
 
 均集中在本文件的顶部区域！你只需要修改这里的数值，然后运行：
     python tools/export_strike_frames.py
@@ -21,6 +19,7 @@ import argparse
 import sys
 from bisect import bisect_right
 from pathlib import Path
+import numpy as np
 import pygame
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,104 +27,74 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 # ==============================================================================
-# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【重叠参数配置区 - 请在此处修改】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【各帧角度与位置配置表 - 核心修改区】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 # ==============================================================================
+# 说明：
+# 1. 任何帧号（从 47 到 78）都可以在下面直接添加或修改！50、54、55、56、73、78 均已列出！
+# 2. rot: 旋转角度（单位：度）
+#       负数 = 逆时针旋转（例如 -11.0 往左上方仰）
+#       正数 = 顺时针旋转（例如 +7.0 往右下方俯）
+# 3. pivot: (可选) 旋转中心坐标。
+#       【如果不填 pivot，系统会自动计算该帧剑身中心作为支点自转，改角度最方便！】
+# 4. dx, dy: (可选) 额外的水平/垂直位移微调。
+#       dx > 0 向右移，dx < 0 向左移；
+#       dy > 0 向下移，dy < 0 向上移。
+# ==============================================================================
+FRAME_TUNING = {
+    # ---------------- 攻击 1：下劈动作 ----------------
+    50: {"rot": -11.0, "dx": 0.0, "dy": 0.0},  # 攻击1 下劈击中帧 (初始角度偏约 -11度)
+    54: {"rot": -5.0,  "dx": 0.0, "dy": 0.0},  # 攻击1 下劈收招最后一帧 (初始角度偏约 -5度)
+
+    # ---------------- 攻击 2：下劈 -> 上挑动作 ----------------
+    55: {"rot": 7.0,   "pivot": (593.0, 1137.0), "dx": 0.0, "dy": 0.0},  # 攻击2 下劈起手帧
+    56: {"rot": 7.0,   "pivot": (593.0, 1137.0), "dx": 0.0, "dy": 0.0},  # 攻击2 下劈收招最后一帧
+    57: {"rot": -8.0,  "pivot": (488.0, 1094.0), "dx": 0.0, "dy": 0.0},  # 攻击2 上挑击中帧
+
+    # ---------------- 攻击 3：突刺动作 ----------------
+    63: {"rot": 0.0,   "dx": 0.0, "dy": 0.0},  # 攻击3 突刺起手
+    65: {"rot": 0.0,   "dx": 0.0, "dy": 0.0},  # 攻击3 刺出帧
+
+    # ---------------- 攻击 4：重劈动作 ----------------
+    71: {"rot": -8.0,  "pivot": (586.0, 1096.0), "dx": 0.0, "dy": 0.0},  # 攻击4 重劈高举蓄力
+    73: {"rot": -19.0, "dx": 0.0, "dy": 0.0},  # 攻击4 重劈击中地表帧 (初始角度偏约 -19度)
+    78: {"rot": -4.0,  "dx": 0.0, "dy": 0.0},  # 攻击4 重劈收招最后一帧 (初始角度偏约 -4度)
+}
 
 # ------------------------------------------------------------------------------
-# 1. 动作段基准原点 (X, Y) —— 决定剑身在导出画布上的基准位置
+# 动作段基准原点 (X, Y) —— 决定剑身在导出画布上的大范围基准位置
 # ------------------------------------------------------------------------------
-# 说明：
-#   每个动作段由 SWF 导出，由于 FFDec 画布注册点在不同动作段有偏移，
-#   key 为该段的起始帧号，控制从该帧开始到下一段起始帧之前的所有帧：
-#     47: 攻击1 起手姿态 (第 47 ~ 49 帧)
-#     50: 攻击1 下劈挥出 (第 50 ~ 54 帧)  <-- 第54帧是攻击1下劈最后一帧
-#     55: 攻击2 下劈过渡 (第 55 ~ 56 帧)  <-- 第56帧是攻击2下劈最后一帧
-#     57: 攻击2 上挑挥出 (第 57 ~ 62 帧)
-#     63: 攻击3 突刺起手 (第 63 ~ 64 帧)
-#     65: 攻击3 突刺前伸 (第 65 ~ 70 帧)
-#     71: 攻击4 重劈起手 (第 71 ~ 72 帧)
-#     73: 攻击4 重劈下砸 (第 73 ~ 78 帧)  <-- 第78帧是攻击4重劈最后一帧
-#
-# 调节规则：
-#   X 增大 -> 剑身向右平移；X 减小 -> 剑身向左平移
-#   Y 增大 -> 剑身向下平移；Y 减小 -> 剑身向上平移
+# X 增大 -> 整体向右；X 减小 -> 整体向左
+# Y 增大 -> 整体向下；Y 减小 -> 整体向上
 # ------------------------------------------------------------------------------
 EXPORT_ORIGINS = {
-    47: (615.0, 1068.0),
-    50: (421.0, 1138.0),   # 攻击1 下劈段基准
-    55: (633.0, 1184.0),   # 攻击2 下劈过渡段基准
-    57: (457.0, 1057.0),   # 攻击2 上挑段基准
-    63: (421.0, 1133.0),
-    65: (418.0, 1132.0),
-    71: (578.0, 1241.0),   # 攻击4 重劈起手段基准
-    73: (421.0, 1138.0),   # 攻击4 重劈砸地段基准
+    47: (615.0, 1068.0),   # 攻击1 起手 (47~49 帧)
+    50: (421.0, 1138.0),   # 攻击1 下劈 (50~54 帧)
+    55: (633.0, 1184.0),   # 攻击2 下劈过渡 (55~56 帧)
+    57: (457.0, 1057.0),   # 攻击2 上挑 (57~62 帧)
+    63: (421.0, 1133.0),   # 攻击3 突刺起手 (63~64 帧)
+    65: (418.0, 1132.0),   # 攻击3 突刺前伸 (65~70 帧)
+    71: (578.0, 1241.0),   # 攻击4 重劈起手 (71~72 帧)
+    73: (421.0, 1138.0),   # 攻击4 重劈下砸 (73~78 帧)
 }
 
-# ------------------------------------------------------------------------------
-# 2. 动作段旋转微调 (角度, (轴心X, 轴心Y)) —— 修正整段动作的剑刃倾斜
-# ------------------------------------------------------------------------------
-# 说明：
-#   key 为动作段起始帧号：
-#     角度值 (浮点数)：正数 = 顺时针旋转，负数 = 逆时针旋转 (单位: 角度 deg)
-#     轴心 (X, Y)：旋转的中心支点，一般取该动作下剑柄或手部位置
-# ------------------------------------------------------------------------------
+# 动作段默认旋转 (兼容段落兜底)
 POSE_ROTATIONS = {
-    55: (7.0, (593.0, 1137.0)),   # 攻击2 下劈段微调 (顺时针 7 度)
-    57: (-8.0, (488.0, 1094.0)),  # 攻击2 上挑段微调 (逆时针 8 度)
-    71: (-8.0, (586.0, 1096.0)),  # 攻击4 重劈起手微调 (逆时针 8 度)
+    55: (7.0, (593.0, 1137.0)),
+    57: (-8.0, (488.0, 1094.0)),
+    71: (-8.0, (586.0, 1096.0)),
 }
 
-# ------------------------------------------------------------------------------
-# 3. 单帧像素级微调偏移 (dx, dy) —— 专用于微调某单一帧（如最后一帧）
-# ------------------------------------------------------------------------------
-# 说明：
-#   如果你发现整段动作对齐了，但某一特定帧（如第 54 帧或第 78 帧最后一帧）
-#   还有 1~2 像素的小偏差，直接在下面填入该帧的微调值 (dx, dy)：
-#     dx 增大 -> 这一帧向右移；dx 减小 -> 这一帧向左移
-#     dy 增大 -> 这一帧向下移；dy 减小 -> 这一帧向上移
-# ------------------------------------------------------------------------------
-PER_FRAME_OFFSETS = {
-    50: (0.0, 0.0),   # 攻击1 下劈击中帧
-    54: (0.0, 0.0),   # 攻击1 下劈最后一帧
-    55: (0.0, 0.0),   # 攻击2 下劈起手帧
-    56: (0.0, 0.0),   # 攻击2 下劈最后一帧
-    73: (0.0, 0.0),   # 攻击4 重劈击中帧
-    78: (0.0, 0.0),   # 攻击4 重劈最后一帧
-}
-
-# ------------------------------------------------------------------------------
-# 4. 单帧旋转角度独立微调 (deg)
-# ------------------------------------------------------------------------------
-# 说明：
-#   如果某一特定帧的角度需要独立追加微调（在段旋转基础上再转动）：
-#   例如: 56: -2.0  (第 56 帧额外逆时针微调 2 度)
-# ------------------------------------------------------------------------------
-PER_FRAME_ROTATIONS = {
-    # 54: 0.0,
-    # 56: 0.0,
-    # 78: 0.0,
-}
-
-# ------------------------------------------------------------------------------
-# 5. 矩阵倾斜项顺序 (保持原生 SWF 矩阵顺序的分段)
-# ------------------------------------------------------------------------------
 PRESERVE_SKEW_ORDER_SEGMENTS = {55}
 
 # ------------------------------------------------------------------------------
-# 6. 人物手部锚点与武器在实机中的整体挂载位置 (main.py 同步使用)
+# 人物手部锚点与武器在实机中的整体挂载位置 (main.py 同步使用)
 # ------------------------------------------------------------------------------
-# WEAPON_HAND_ANCHOR: 角色素体上右手握剑的基准点坐标 (X, Y)
-# WEAPON_OFFSET: 金剑9相对于右手的整体偏移 (面朝前后偏移, 上下偏移)
-#   offset[0] 增大 -> 武器沿人物面朝方向向前推；减小 -> 往后收
-#   offset[1] 增大 -> 武器整体向下沉；减小 -> 往上提
-# WEAPON_SCALE: 武器大小缩放比例 (1.00 为原版尺寸)
-# ------------------------------------------------------------------------------
-WEAPON_HAND_ANCHOR = (440, 196)
-WEAPON_OFFSET = (-5, 8)
-WEAPON_SCALE = 1.00
+WEAPON_HAND_ANCHOR = (440, 196) # 角色右手握柄基准
+WEAPON_OFFSET = (-5, 8)         # (面朝前后推拉, 上下升降)
+WEAPON_SCALE = 1.00             # 尺寸缩放
 
 # ==============================================================================
-# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【重叠参数配置区 结束】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【配置区 结束】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 # ==============================================================================
 
 
@@ -144,6 +113,18 @@ DEFAULT_REVIEW_FRAMES = [
     (73, "攻击4_重劈_击中帧"),
     (78, "攻击4_重劈_最后一帧"),
 ]
+
+
+def safe_save(image, path, **kwargs):
+    """保存图片，并对 OneDrive 同步锁冲突进行防抖重试"""
+    import time
+    for attempt in range(5):
+        try:
+            image.save(path, **kwargs)
+            return
+        except OSError:
+            time.sleep(0.2)
+    image.save(path, **kwargs)
 
 
 def get_font(size=16):
@@ -177,10 +158,12 @@ def rebuild_gold9_sword_layers(target_dir: Path = LAYERS_DIR):
         origin_frame = origin_frames[bisect_right(origin_frames, frame) - 1]
         origin_x, origin_y = EXPORT_ORIGINS[origin_frame]
 
-        # 叠加上单帧专属微调偏移 (如果有)
-        fx, fy = PER_FRAME_OFFSETS.get(frame, (0.0, 0.0))
-        final_ox = origin_x + fx
-        final_oy = origin_y + fy
+        # 1. 检查 FRAME_TUNING 单帧配置
+        tuning = FRAME_TUNING.get(frame, {})
+        dx = tuning.get("dx", 0.0)
+        dy = tuning.get("dy", 0.0)
+        final_ox = origin_x + dx
+        final_oy = origin_y + dy
 
         layer = transformed_layer(
             shape,
@@ -191,24 +174,33 @@ def rebuild_gold9_sword_layers(target_dir: Path = LAYERS_DIR):
             ),
         )
 
-        # 动作段旋转
-        pose_start = origin_frame
-        if pose_start in POSE_ROTATIONS:
-            angle, pivot = POSE_ROTATIONS[pose_start]
+        # 2. 检查单帧角度微调
+        rot = tuning.get("rot", None)
+        pivot = tuning.get("pivot", None)
+        if rot is not None and rot != 0.0:
+            if pivot is None:
+                # 自动计算该帧剑身自身质心作为旋转轴心，方便用户直接改角度
+                alpha = np.array(layer.getchannel("A"))
+                ys, xs = np.where(alpha > 40)
+                if len(xs) > 0:
+                    pivot = (float(xs.mean()), float(ys.mean()))
+                else:
+                    pivot = (layer.width / 2.0, layer.height / 2.0)
             layer = layer.rotate(
-                angle,
+                rot,
                 resample=Image.Resampling.BICUBIC,
                 center=pivot,
             )
-
-        # 单帧独立旋转 (如果有)
-        if frame in PER_FRAME_ROTATIONS and PER_FRAME_ROTATIONS[frame] != 0.0:
+        elif origin_frame in POSE_ROTATIONS:
+            # 动作段兜底旋转
+            angle, p_center = POSE_ROTATIONS[origin_frame]
             layer = layer.rotate(
-                PER_FRAME_ROTATIONS[frame],
+                angle,
                 resample=Image.Resampling.BICUBIC,
+                center=p_center,
             )
 
-        layer.save(target_dir / f"{frame}.png", optimize=True)
+        safe_save(layer, target_dir / f"{frame}.png", optimize=True)
         count += 1
 
     return count
@@ -253,12 +245,14 @@ def export_frame_review(frame_num: int, label: str, output_dir: Path):
         p3.alpha_composite(layer_im.crop(crop_box))
         sheet.paste(p3.resize((w_panel_w, w_panel_h)), (w_panel_w * 2, 40))
 
+    tuning = FRAME_TUNING.get(frame_num, {})
+    curr_rot = tuning.get("rot", "默认")
     draw.text((10, 8), f"第 {frame_num} 帧 · {label} · 去黑原图", fill="#ffffff", font=font)
-    draw.text((w_panel_w + 10, 8), "独立剑身层 (当前参数生成)", fill="#ffd700", font=font)
+    draw.text((w_panel_w + 10, 8), f"独立剑身 (当前角度: {curr_rot}°)", fill="#ffd700", font=font)
     draw.text((w_panel_w * 2 + 10, 8), "重叠效果 (原图 + 剑身)", fill="#00ffcc", font=font)
 
     layer_review_path = output_dir / f"frame_{frame_num}_{label}_weapon_layer.png"
-    sheet.save(layer_review_path)
+    safe_save(sheet, layer_review_path)
 
     # Part 2: In-Game Character + Weapon Composite
     stand_p = Image.open(PLAYER_DIR / "25.png").convert("RGBA")
@@ -300,22 +294,20 @@ def export_frame_review(frame_num: int, label: str, output_dir: Path):
     game_sheet.paste(game_renders[0], (0, 40))
     game_sheet.paste(game_renders[1], (500, 40))
 
-    gdraw.text((10, 8), f"第 {frame_num} 帧 ({label}) · 白底实机显示效果", fill="#ffffff", font=font)
-    gdraw.text((510, 8), f"第 {frame_num} 帧 ({label}) · 暗底实机显示效果 (观察特效)", fill="#ffd700", font=font)
+    gdraw.text((10, 8), f"第 {frame_num} 帧 ({label}) · 白底实机显示", fill="#ffffff", font=font)
+    gdraw.text((510, 8), f"第 {frame_num} 帧 ({label}) · 暗底实机显示 (旋转: {curr_rot}°)", fill="#ffd700", font=font)
 
     game_review_path = output_dir / f"frame_{frame_num}_{label}_game_view.png"
-    game_sheet.save(game_review_path)
+    safe_save(game_sheet, game_review_path)
 
     return layer_review_path, game_review_path
 
 
 def export_all():
-    # 步骤 1：先重新生成全套剑身图层缓存
     print("[1/2] 正在根据最新参数重建金剑9独立剑身图层缓存...")
     count = rebuild_gold9_sword_layers(LAYERS_DIR)
     print(f"      成功生成 {count} 帧高精度剑身图层 -> {LAYERS_DIR}")
 
-    # 步骤 2：导出关键帧效果
     print(f"[2/2] 正在导出下劈/重劈关键帧显示效果至: {OUTPUT_DIR}")
     exported = []
     for frame_num, label in DEFAULT_REVIEW_FRAMES:
@@ -323,7 +315,6 @@ def export_all():
         exported.append((frame_num, label, l_path, g_path))
         print(f"  [√] 第 {frame_num} 帧 ({label}) 导出完成: {l_path.name}, {g_path.name}")
 
-    # 汇总大图
     font = get_font(18)
     summary_w = 400
     summary_h = 320
@@ -331,7 +322,7 @@ def export_all():
     rows = (len(DEFAULT_REVIEW_FRAMES) + 1) // 2
     overview = Image.new("RGB", (summary_w * cols, summary_h * rows + 40), "#141721")
     odraw = ImageDraw.Draw(overview)
-    odraw.text((15, 8), "下劈 & 重劈最后一帧实机显示效果总览", fill="#ffffff", font=font)
+    odraw.text((15, 8), "下劈 & 重劈关键帧实机显示效果总览", fill="#ffffff", font=font)
 
     for idx, (frame_num, label, _, g_path) in enumerate(exported):
         c = idx % cols
@@ -339,10 +330,12 @@ def export_all():
         g_im = Image.open(g_path)
         dark_half = g_im.crop((500, 40, 1000, 440)).resize((summary_w, summary_h - 30))
         overview.paste(dark_half, (c * summary_w, 40 + r * summary_h))
-        odraw.text((c * summary_w + 10, 45 + r * summary_h), f"F{frame_num}: {label}", fill="#00ffcc", font=get_font(15))
+        tuning = FRAME_TUNING.get(frame_num, {})
+        rot_str = f"rot:{tuning.get('rot', '0')}°" if 'rot' in tuning else ""
+        odraw.text((c * summary_w + 10, 45 + r * summary_h), f"F{frame_num}: {label} ({rot_str})", fill="#00ffcc", font=get_font(15))
 
     overview_path = OUTPUT_DIR / "attack_downstroke_heavy_summary.png"
-    overview.save(overview_path)
+    safe_save(overview, overview_path)
     print(f"\n[√] 汇总总览图更新完成: {overview_path}")
 
 
