@@ -94,8 +94,8 @@ class OriginalCharacterVisual:
         self.armor_action = None
         self.armor_frame = 1
         self.armor_frame_count = 0
-        self.armor_origin_x = 49.9
-        self.armor_origin_y = 78.25
+        self.armor_origin_x = 389.7
+        self.armor_origin_y = 97.9
         self.body_origin_x = 408.85
         self.body_origin_y = 218.65
         self.weapon_frames = []

@@ -1,15 +1,16 @@
 {
-  "source": "yzzr_all_swf/equip_2_1_v2.swf",
-  "sprite_id": 119,
+  "source": "yzzr_all_swf/equip_0_1_v2.swf",
+  "model_index": 0,
+  "sprite_id": 121,
   "class_name": "甲白1",
-  "frame_count": 310,
+  "frame_count": 413,
   "canvas_size": [
-    108,
-    84
+    448,
+    103
   ],
   "registration_point": [
-    49.9,
-    78.25
+    389.7,
+    97.9
   ],
   "body_registration_point": [
     408.85,
@@ -29,97 +30,97 @@
     {
       "name": "站",
       "frame": 25,
-      "end_frame": 35
+      "end_frame": 29
     },
     {
       "name": "跳",
-      "frame": 36,
-      "end_frame": 39
+      "frame": 30,
+      "end_frame": 33
     },
     {
       "name": "被打",
-      "frame": 40,
+      "frame": 34,
       "end_frame": 46
     },
     {
       "name": "攻击1",
       "frame": 47,
-      "end_frame": 50
-    },
-    {
-      "name": "攻击2",
-      "frame": 51,
       "end_frame": 54
     },
     {
-      "name": "攻击3",
+      "name": "攻击2",
       "frame": 55,
       "end_frame": 62
     },
     {
-      "name": "攻击4",
+      "name": "攻击3",
       "frame": 63,
-      "end_frame": 76
+      "end_frame": 70
     },
     {
-      "name": "上挑",
-      "frame": 77,
-      "end_frame": 89
-    },
-    {
-      "name": "下斩",
-      "frame": 90,
-      "end_frame": 114
-    },
-    {
-      "name": "技能1",
-      "frame": 115,
-      "end_frame": 124
-    },
-    {
-      "name": "技能2",
-      "frame": 125,
-      "end_frame": 139
-    },
-    {
-      "name": "技能4",
-      "frame": 140,
-      "end_frame": 155
-    },
-    {
-      "name": "技能3",
-      "frame": 156,
-      "end_frame": 171
+      "name": "攻击4",
+      "frame": 71,
+      "end_frame": 78
     },
     {
       "name": "跑攻",
-      "frame": 172,
-      "end_frame": 181
+      "frame": 79,
+      "end_frame": 89
+    },
+    {
+      "name": "上挑",
+      "frame": 90,
+      "end_frame": 101
+    },
+    {
+      "name": "下斩",
+      "frame": 102,
+      "end_frame": 124
     },
     {
       "name": "转职技能1",
-      "frame": 182,
-      "end_frame": 196
+      "frame": 125,
+      "end_frame": 147
     },
     {
       "name": "转职技能2",
-      "frame": 197,
-      "end_frame": 235
+      "frame": 148,
+      "end_frame": 186
     },
     {
       "name": "转职技能3",
-      "frame": 236,
-      "end_frame": 273
+      "frame": 187,
+      "end_frame": 207
     },
     {
       "name": "转职技能4",
-      "frame": 274,
-      "end_frame": 296
+      "frame": 208,
+      "end_frame": 258
+    },
+    {
+      "name": "技能1",
+      "frame": 259,
+      "end_frame": 277
+    },
+    {
+      "name": "技能4",
+      "frame": 278,
+      "end_frame": 323
+    },
+    {
+      "name": "技能3",
+      "frame": 324,
+      "end_frame": 359
+    },
+    {
+      "name": "技能2",
+      "frame": 360,
+      "end_frame": 399
     },
     {
       "name": "怪物技能",
-      "frame": 297,
-      "end_frame": 310
+      "frame": 400,
+      "end_frame": 413
     }
   ]
 }
