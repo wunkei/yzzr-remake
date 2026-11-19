@@ -19,24 +19,35 @@ SHAPE_SVG = ROOT / "WuQi_X0_v1905" / "shapes" / "1659.svg"
 PARENT_SPRITE_ID = 1681
 SHAPE_ID = 1659
 CANVAS_SIZE = (1011, 1514)
-# FFDec exports each attack pose with a different canvas registration. Tune each
-# segment separately against the flattened parent frames.
-EXPORT_ORIGINS = {
-    47: (615.0, 1068.0),
-    50: (421.0, 1138.0),
-    55: (633.0, 1184.0),
-    57: (457.0, 1057.0),
-    63: (421.0, 1133.0),
-    65: (418.0, 1132.0),
-    71: (578.0, 1241.0),
-    73: (421.0, 1138.0),
-}
-POSE_ROTATIONS = {
-    55: (1.0, (593.0, 1137.0)),
-    57: (-8.0, (488.0, 1094.0)),
-    71: (-8.0, (586.0, 1096.0)),
-}
-PRESERVE_SKEW_ORDER_SEGMENTS = {55}
+
+# Import the user-editable configuration from export_strike_frames
+try:
+    from export_strike_frames import (
+        EXPORT_ORIGINS,
+        POSE_ROTATIONS,
+        PER_FRAME_OFFSETS,
+        PER_FRAME_ROTATIONS,
+        PRESERVE_SKEW_ORDER_SEGMENTS,
+    )
+except ImportError:
+    EXPORT_ORIGINS = {
+        47: (615.0, 1068.0),
+        50: (421.0, 1138.0),
+        55: (633.0, 1184.0),
+        57: (457.0, 1057.0),
+        63: (421.0, 1133.0),
+        65: (418.0, 1132.0),
+        71: (578.0, 1241.0),
+        73: (421.0, 1138.0),
+    }
+    POSE_ROTATIONS = {
+        55: (7.0, (593.0, 1137.0)),
+        57: (-8.0, (488.0, 1094.0)),
+        71: (-8.0, (586.0, 1096.0)),
+    }
+    PER_FRAME_OFFSETS = {}
+    PER_FRAME_ROTATIONS = {}
+    PRESERVE_SKEW_ORDER_SEGMENTS = {55}
 OUTPUT = ROOT / "python_assets" / "weapon_layers" / "gold9_sword"
 
 
@@ -159,10 +170,13 @@ def main():
             continue
         origin_frame = origin_frames[bisect_right(origin_frames, frame) - 1]
         origin_x, origin_y = EXPORT_ORIGINS[origin_frame]
+        fx, fy = PER_FRAME_OFFSETS.get(frame, (0.0, 0.0))
+        final_ox = origin_x + args.origin_dx + fx
+        final_oy = origin_y + args.origin_dy + fy
         layer = transformed_layer(
             shape,
             matrix,
-            (origin_x + args.origin_dx, origin_y + args.origin_dy),
+            (final_ox, final_oy),
             swap_skews=(
                 not args.preserve_skew_order
                 and origin_frame not in PRESERVE_SKEW_ORDER_SEGMENTS
@@ -175,6 +189,11 @@ def main():
                 angle,
                 resample=Image.Resampling.BICUBIC,
                 center=pivot,
+            )
+        if frame in PER_FRAME_ROTATIONS and PER_FRAME_ROTATIONS[frame] != 0.0:
+            layer = layer.rotate(
+                PER_FRAME_ROTATIONS[frame],
+                resample=Image.Resampling.BICUBIC,
             )
         layer.save(args.output_dir / f"{frame}.png", optimize=True)
         written += 1

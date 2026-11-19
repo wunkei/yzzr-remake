@@ -35,12 +35,24 @@ class OriginalCharacterVisual:
         (1168, "DefineSprite_1235_剑蓝1"),
         (1044, "DefineSprite_1044_剑蓝4"),
     )
-    WEAPON_HAND_ANCHOR = (440, 196)
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        from export_strike_frames import (
+            WEAPON_HAND_ANCHOR as _CFG_HAND_ANCHOR,
+            WEAPON_OFFSET as _CFG_GOLD9_OFFSET,
+            WEAPON_SCALE as _CFG_GOLD9_SCALE,
+        )
+    except Exception:
+        _CFG_HAND_ANCHOR = (440, 196)
+        _CFG_GOLD9_OFFSET = (-5, 8)
+        _CFG_GOLD9_SCALE = 1.00
+
+    WEAPON_HAND_ANCHOR = _CFG_HAND_ANCHOR
     # Tune each exported weapon independently. Offset X moves along the facing
     # direction; Offset Y moves down. Scale is relative to the exported SWF art.
     WEAPON_TUNING = {
         1108: {"scale": 1.00, "offset": (-17, 3)},
-        1235: {"scale": 1.00, "offset": (-5, 8)},
+        1235: {"scale": _CFG_GOLD9_SCALE, "offset": _CFG_GOLD9_OFFSET},
         1168: {"scale": 1.00, "offset": (-10, 10)},
         1044: {"scale": 1.00, "offset": (-10, 10)},
     }
