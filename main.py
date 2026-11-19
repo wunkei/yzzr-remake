@@ -652,7 +652,7 @@ class Game:
         if key in Player.LEFT_KEYS + Player.RIGHT_KEYS:
             p.direction_key_down(key, pygame.time.get_ticks() / 1000.0)
             return
-        if key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
+        if key == pygame.K_k:
             p.jump()
         elif key in (pygame.K_j, pygame.K_z):
             attack = p.attack()
@@ -664,14 +664,6 @@ class Game:
                 for enemy in self.enemies:
                     if box.colliderect(enemy.rect):
                         enemy.take_hit(damage, p.rect.centerx)
-        elif key in (pygame.K_k, pygame.K_x) and p.skill_cd <= 0 and p.mp >= 15:
-            p.mp -= 15
-            p.skill_cd = 0.65
-            if p.is_dashing:
-                p.dash_key = None
-                p.is_dashing = False
-                p.last_direction_tap.clear()
-            self.bolts.append(Bolt(p.rect.centerx + p.facing * 24, p.rect.centery - 7, p.facing))
         elif key == pygame.K_v and p.visual:
             p.visual.cycle_weapon()
         elif key == pygame.K_c and p.visual:
@@ -785,7 +777,7 @@ class Game:
         self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
         self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
         self.screen.blit(self.font.render(f"关卡 {self.wave}/3", True, WHITE), (WIDTH - 112, 22))
-        controls = "双击 A/D 或方向键冲刺   冲刺中 J/Z 跑攻   Shift 加速   Space 跳跃   K/X 技能   V 换剑   C 换装"
+        controls = "双击 A/D 或方向键冲刺   冲刺中 J/Z 跑攻   Shift 加速   K 跳跃   V 换剑   C 换装"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
         if self.game_over or self.victory:
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)

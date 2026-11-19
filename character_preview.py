@@ -37,7 +37,7 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP) and on_ground:
+                elif event.key == pygame.K_k and on_ground:
                     vertical_speed = JUMP_SPEED
                     on_ground = False
                 elif event.key in (pygame.K_j, pygame.K_z):
