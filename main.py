@@ -42,6 +42,8 @@ class OriginalCharacterVisual:
         else ORIGINAL_SPRITE_DIR
     )
     TIMELINE_FILE = ROOT / "python_assets" / "player0_timeline.json"
+    DEFAULT_ARMOR_DIR = ROOT / "python_assets" / "player_default_armor_frames"
+    DEFAULT_ARMOR_TIMELINE = ROOT / "python_assets" / "default_armor_timeline.json"
     WEAPON_MANIFEST = ROOT / "python_assets" / "weapon_timelines.json"
     SWORD_LAYER_DIRS = {
         1235: ROOT / "python_assets" / "weapon_layers" / "gold9_sword",
@@ -87,6 +89,15 @@ class OriginalCharacterVisual:
         self.loop = True
         self.one_shot = False
         self.available = False
+        self.armor_frames = []
+        self.armor_actions = {}
+        self.armor_action = None
+        self.armor_frame = 1
+        self.armor_frame_count = 0
+        self.armor_origin_x = 54
+        self.armor_origin_y = 80
+        self.body_origin_x = 408.85
+        self.body_origin_y = 218.65
         self.weapon_frames = []
         self.weapon_sword_frames = []
         self.weapon_index = 0
@@ -117,10 +128,31 @@ class OriginalCharacterVisual:
                 self.frames.append((surface, box))
             else:
                 self.frames.append((None, (0, 0, 0, 0)))
+        self._load_default_armor()
         self.available = bool(self.frames and self.actions)
         if self.available:
             self._load_weapon(0)
             self.play("站", loop=True, force=True)
+
+    def _load_default_armor(self):
+        if not self.DEFAULT_ARMOR_TIMELINE.exists():
+            return
+        with self.DEFAULT_ARMOR_TIMELINE.open("r", encoding="utf-8") as timeline_file:
+            timeline = json.load(timeline_file)
+        if not has_complete_frame_set(self.DEFAULT_ARMOR_DIR, timeline["frame_count"]):
+            return
+        self.armor_actions = {
+            label["name"]: (label["frame"], label["end_frame"])
+            for label in timeline["labels"]
+            if label["name"] in self.actions
+        }
+        self.armor_origin_x, self.armor_origin_y = timeline["registration_point"]
+        self.body_origin_x, self.body_origin_y = timeline["body_registration_point"]
+        self.armor_frames = [
+            pygame.image.load(str(self.DEFAULT_ARMOR_DIR / f"{frame}.png")).convert_alpha()
+            for frame in range(1, timeline["frame_count"] + 1)
+        ]
+        self.armor_frame_count = len(self.armor_frames)
 
     def _load_weapon(self, index):
         self.weapon_sword_frames = []
@@ -242,6 +274,9 @@ class OriginalCharacterVisual:
         self.one_shot = not loop
         self.frame = self.actions[action][0]
         self.accumulator = 0.0
+        if action in self.armor_actions:
+            self.armor_action = action
+            self.armor_frame = self.armor_actions[action][0]
 
     def update(self, dt):
         if not self.available or self.action not in self.actions:
@@ -250,6 +285,8 @@ class OriginalCharacterVisual:
         frame_step = 1.0 / self.FPS
         while self.accumulator >= frame_step:
             self.accumulator -= frame_step
+            previous_action = self.action
+            previous_frame = self.frame
             end_frame = self.actions[self.action][1]
             if self.frame < end_frame:
                 self.frame += 1
@@ -262,6 +299,13 @@ class OriginalCharacterVisual:
                 break
             else:
                 self.frame = self.actions[self.action][0]
+            if self.armor_frames and self.armor_action in self.armor_actions:
+                body_looped = self.action == previous_action and self.loop and previous_frame == end_frame
+                if self.action != previous_action or body_looped:
+                    self.armor_action = self.action
+                    self.armor_frame = self.armor_actions[self.action][0]
+                else:
+                    self.armor_frame = self.armor_frame % self.armor_frame_count + 1
 
     def draw(self, screen, world_x, world_bottom, facing):
         if not self.available:
@@ -277,6 +321,17 @@ class OriginalCharacterVisual:
             draw_x = round(world_x - self.anchor_x + left)
         draw_y = round(world_bottom - self.anchor_y + top)
         screen.blit(surface, (draw_x, draw_y))
+        if self.armor_frames and self.armor_action in self.armor_actions:
+            armor = self.armor_frames[self.armor_frame - 1]
+            if facing > 0:
+                armor = pygame.transform.flip(armor, True, False)
+                armor_x = round(
+                    world_x + self.anchor_x - (self.body_origin_x - self.armor_origin_x + armor.get_width())
+                )
+            else:
+                armor_x = round(world_x - self.anchor_x + self.body_origin_x - self.armor_origin_x)
+            armor_y = round(world_bottom - self.anchor_y + self.body_origin_y - self.armor_origin_y)
+            screen.blit(armor, (armor_x, armor_y))
         if self.weapon_frames:
             weapon, weapon_box = self.weapon_frames[self.frame - 1]
             register_x, register_y = self.weapon_register
