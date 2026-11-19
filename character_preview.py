@@ -27,6 +27,7 @@ def main():
     attack_number = 0
     attack_cooldown = 0.0
     dark_background = False
+    show_hitboxes = False
     running = True
 
     while running:
@@ -61,6 +62,8 @@ def main():
                     visual.cycle_costume()
                 elif event.key == pygame.K_b:
                     dark_background = not dark_background
+                elif event.key == pygame.K_h:
+                    show_hitboxes = not show_hitboxes
                 elif event.key == pygame.K_r:
                     x = WIDTH / 2
                     bottom = float(GROUND_Y)
@@ -100,9 +103,12 @@ def main():
         hint_color = (225, 230, 245) if dark_background else (70, 70, 70)
         screen.fill(background)
         visual.draw(screen, x, bottom, facing)
+        if show_hitboxes:
+            for hitbox in visual.hitboxes_at(x, bottom, facing):
+                pygame.draw.rect(screen, (255, 55, 45), hitbox, 2)
 
         hint = pygame.font.Font(None, 21).render(
-            "A/D 移动  Shift 跑  Space 跳  W/S+J 上挑/下斩  J/Z 攻击  1-4 动作  V 换剑  C 换装  B 背景  R 归中  Esc 退出",
+            "A/D 移动  Shift 跑  Space 跳  W/S+J 上挑/下斩  J/Z 攻击  H 判定框  1-4 动作  V 换剑  C 换装  B 背景  R 归中  Esc 退出",
             True,
             hint_color,
         )

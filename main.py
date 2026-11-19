@@ -1,6 +1,7 @@
 """A small playable Python prototype of the original Flash action RPG."""
 
 import json
+import math
 import random
 import sys
 from pathlib import Path
@@ -48,6 +49,8 @@ class OriginalCharacterVisual:
     S4_COSTUME_DIR = ROOT / "python_assets" / "player_s4_costume_frames"
     S4_COSTUME_TIMELINE = ROOT / "python_assets" / "s4_costume_timeline.json"
     WEAPON_MANIFEST = ROOT / "python_assets" / "weapon_timelines.json"
+    WEAPON_HITBOX_MANIFEST = ROOT / "python_assets" / "weapon_hitboxes.json"
+    WEAPON_SWF_SPRITE_IDS = {1235: 1681, 1108: 1904, 1168: 1235, 1044: 1044}
     SWORD_LAYER_DIRS = {
         1235: ROOT / "python_assets" / "weapon_layers" / "gold9_sword",
     }
@@ -109,6 +112,13 @@ class OriginalCharacterVisual:
         self.weapon_frames = []
         self.weapon_sword_frames = []
         self.weapon_index = 0
+        self.weapon_swf_sprite_id = None
+        self.weapon_register = None
+        self.weapon_offset = (0, 0)
+        self.weapon_hitbox_data = {}
+        if self.WEAPON_HITBOX_MANIFEST.is_file():
+            with self.WEAPON_HITBOX_MANIFEST.open("r", encoding="utf-8") as hitbox_file:
+                self.weapon_hitbox_data = json.load(hitbox_file).get("sprites", {})
         self._load_original_frames()
 
     def _load_original_frames(self):
@@ -261,6 +271,7 @@ class OriginalCharacterVisual:
                 frames.append((None, (0, 0, 0, 0)))
         self.weapon_frames = frames
         self.weapon_index = index
+        self.weapon_swf_sprite_id = self.WEAPON_SWF_SPRITE_IDS.get(weapon_id)
         self.weapon_register = (register_x, register_y)
         self.weapon_offset = (offset_x, offset_y)
         sword_layer_dir = self.SWORD_LAYER_DIRS.get(weapon_id)
@@ -299,6 +310,47 @@ class OriginalCharacterVisual:
     def cycle_weapon(self):
         if self.available:
             self._load_weapon((self.weapon_index + 1) % len(self.WEAPONS))
+
+    def hitboxes_at(self, world_x, world_bottom, facing):
+        """Return the SWF weapon's active HitXX rectangles in world coordinates."""
+        if not self.weapon_swf_sprite_id or not self.weapon_register:
+            return []
+        sprite_data = self.weapon_hitbox_data.get(str(self.weapon_swf_sprite_id), {})
+        frame_boxes = sprite_data.get("active_frames", {}).get(str(self.frame), ())
+        if not frame_boxes:
+            return []
+
+        weapon_id, _sprite_name = self.WEAPONS[self.weapon_index]
+        tuning = self.WEAPON_TUNING[weapon_id]
+        scale = float(tuning["scale"])
+        canvas_width = sprite_data["canvas_size"][0] * scale
+        register_x, register_y = self.weapon_register
+        offset_x, offset_y = self.weapon_offset
+        boxes = []
+        for left, top, right, bottom in frame_boxes:
+            left *= scale
+            top *= scale
+            right *= scale
+            bottom *= scale
+            if facing > 0:
+                world_left = world_x + self.anchor_x - register_x - right
+                world_right = world_x + self.anchor_x - register_x - left
+            else:
+                world_left = world_x - self.anchor_x + register_x + left
+                world_right = world_x - self.anchor_x + register_x + right
+            world_left += offset_x * facing
+            world_right += offset_x * facing
+            world_top = world_bottom - self.anchor_y + register_y + top + offset_y
+            world_bottom_box = world_bottom - self.anchor_y + register_y + bottom + offset_y
+            boxes.append(
+                pygame.Rect(
+                    math.floor(world_left),
+                    math.floor(world_top),
+                    max(1, math.ceil(world_right) - math.floor(world_left)),
+                    max(1, math.ceil(world_bottom_box) - math.floor(world_top)),
+                )
+            )
+        return boxes
 
     def cycle_costume(self):
         if self.s4_costume_frames:
@@ -457,6 +509,10 @@ class Player:
         self.dash_key = None
         self.is_dashing = False
         self.run_attack_timer = 0.0
+        self.attack_active = False
+        self.attack_targets = set()
+        self.current_attack_run = False
+        self.last_attack_kind = "normal"
 
     def direction_key_down(self, key, now):
         if key not in self.LEFT_KEYS + self.RIGHT_KEYS:
@@ -545,6 +601,9 @@ class Player:
                 elif not self.on_ground:
                     attack_kind = "air"
             self.last_attack_kind = attack_kind
+            self.current_attack_run = run_attack
+            self.attack_active = True
+            self.attack_targets.clear()
             if self.visual:
                 action = {
                     "run": "跑攻",
@@ -557,8 +616,8 @@ class Player:
                 self.dash_key = None
                 self.is_dashing = False
                 self.last_direction_tap.clear()
-            return self.attack_box(run_attack, attack_kind), run_attack
-        return None
+            return True
+        return False
 
     def attack_box(self, run_attack=False, attack_kind="normal"):
         if attack_kind == "up":
@@ -678,15 +737,8 @@ class Game:
         if key == pygame.K_k:
             p.jump()
         elif key in (pygame.K_j, pygame.K_z):
-            attack = p.attack(pygame.key.get_pressed())
-            if attack:
-                box, run_attack = attack
-                damage = 17 + (p.level - 1) * 3 + p.combo * 2
-                if run_attack:
-                    damage = round(damage * 1.5)
-                for enemy in self.enemies:
-                    if box.colliderect(enemy.rect):
-                        enemy.take_hit(damage, p.rect.centerx)
+            if p.attack(pygame.key.get_pressed()) and (not p.visual or not p.visual.available):
+                self.resolve_player_attack()
         elif key == pygame.K_v and p.visual:
             p.visual.cycle_weapon()
         elif key == pygame.K_c and p.visual:
@@ -698,6 +750,7 @@ class Game:
         p = self.player
         keys = pygame.key.get_pressed()
         p.update(dt, keys)
+        self.resolve_player_attack()
         for enemy in self.enemies:
             enemy.update(dt, p)
         for bolt in self.bolts:
@@ -728,6 +781,31 @@ class Game:
             elif self.wave_pause > 1.5:
                 self.wave_pause = 0
                 self.spawn_wave()
+
+    def resolve_player_attack(self):
+        p = self.player
+        if not p.attack_active:
+            return
+        if p.visual and p.visual.available:
+            if not p.visual.one_shot:
+                p.attack_active = False
+                return
+            boxes = p.visual.hitboxes_at(p.rect.centerx, p.rect.bottom, p.facing)
+        else:
+            if p.attack_timer <= 0:
+                p.attack_active = False
+                return
+            boxes = [p.attack_box(p.current_attack_run, p.last_attack_kind)]
+
+        if not boxes:
+            return
+        damage = 17 + (p.level - 1) * 3 + p.combo * 2
+        if p.current_attack_run:
+            damage = round(damage * 1.5)
+        for enemy in self.enemies:
+            if enemy not in p.attack_targets and any(box.colliderect(enemy.rect) for box in boxes):
+                enemy.take_hit(damage, p.rect.centerx)
+                p.attack_targets.add(enemy)
 
     def draw_background(self, camera):
         self.screen.fill(SKY)
