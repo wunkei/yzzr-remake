@@ -169,6 +169,16 @@ class OriginalCharacterVisual:
         self.weapon_offset = (offset_x, offset_y)
         sword_layer_dir = self.SWORD_LAYER_DIRS.get(weapon_id)
         sword_frames = [None] * sprite["frame_count"]
+        if sword_layer_dir:
+            # 自动比对 export_strike_frames.py 修改时间，若参数更新则自动静默重构缓存
+            cfg_file = ROOT / "tools" / "export_strike_frames.py"
+            sample_layer = sword_layer_dir / "50.png"
+            if cfg_file.is_file() and (not sample_layer.is_file() or cfg_file.stat().st_mtime > sample_layer.stat().st_mtime):
+                try:
+                    from export_strike_frames import rebuild_gold9_sword_layers
+                    rebuild_gold9_sword_layers(sword_layer_dir)
+                except Exception:
+                    pass
         if sword_layer_dir and sword_layer_dir.is_dir():
             for frame_number in range(47, min(79, sprite["frame_count"] + 1)):
                 layer_path = sword_layer_dir / f"{frame_number}.png"
