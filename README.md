@@ -4,7 +4,7 @@
 
 原版角色和武器各有 413 帧，动作标签与帧区间一致，来自 `PlayerMc_X0_v940.swf` 和 `WuQi_X0_v1905.swf`。`tools/extract_swf_timeline.py` 用于生成 `python_assets` 下的时间轴索引。角色使用固定脚底锚点，武器根据站立帧里的手柄注册到手部；动作播放时复用相同帧号。
 
-原版还会用 `Head` 子图层和 `headFrame` 固定当前发型。`python_assets/player0_head_timeline.json` 已提取出头部子图层的逐帧变换；目前 Python 预览直接播放原版合成帧，头部固定逻辑还在校准中。护甲外观层也尚未接入。
+原版还会用 `Head` 子图层和 `headFrame` 固定当前发型。`python_assets/player0_head_timeline.json` 已提取出头部子图层的逐帧变换；`tools/build_player_fixed_frames.py` 将固定发型合成进 413 帧角色图。为避免头发替换后颈部出现透明缝隙，旧头部清理遮罩保持原位，只将新头部向下微调 2 个源像素，让头颈有轻微重叠。运行 `python tools/build_player_fixed_frames.py --force` 可重建角色帧。护甲外观层也尚未接入。
 
 ## 启动
 

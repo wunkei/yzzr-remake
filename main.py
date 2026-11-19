@@ -23,13 +23,15 @@ class OriginalCharacterVisual:
     """Play the original base-character SWF frames using their registered pivot."""
 
     FPS = 30  # The original game advances its MovieClips at 30 frames per second.
+    FRAME_COUNT = 413
     FIXED_SPRITE_DIR = ROOT / "python_assets" / "player0_fixed_frames"
     ORIGINAL_SPRITE_DIR = (
         ROOT / "playermc_x0_v940" / "sprites" / "DefineSprite_248_src.Skin.Skin_player0"
     )
     SPRITE_DIR = (
         FIXED_SPRITE_DIR
-        if FIXED_SPRITE_DIR.is_dir() and any(FIXED_SPRITE_DIR.glob("*.png"))
+        if FIXED_SPRITE_DIR.is_dir()
+        and all((FIXED_SPRITE_DIR / f"{frame}.png").is_file() for frame in range(1, FRAME_COUNT + 1))
         else ORIGINAL_SPRITE_DIR
     )
     TIMELINE_FILE = ROOT / "python_assets" / "player0_timeline.json"

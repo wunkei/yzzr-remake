@@ -36,16 +36,25 @@ OX_HEAD = 44.3
 OY_HEAD = 115.65
 OX_SKIN = 408.85
 OY_SKIN = 218.65
+# Head frame 1's lower silhouette sits about two source pixels higher than the
+# animated head silhouettes at the neck. Nudge the replacement down to preserve
+# the overlap that is present in the original composite frames.
+HEAD_NECK_OVERLAP_Y = 2.0
 
 
-def get_head_transform(frame_info: dict, head_image: Image.Image, canvas_size: tuple[int, int]) -> Image.Image:
+def get_head_transform(
+    frame_info: dict,
+    head_image: Image.Image,
+    canvas_size: tuple[int, int],
+    vertical_adjust: float = 0.0,
+) -> Image.Image:
     """Transform a head sprite onto the body canvas using Flash matrix geometry."""
     a, d = frame_info["scale"]
     b, c = frame_info["rotate"]
     tx, ty = frame_info["translate"]
 
     x0 = tx + OX_SKIN - a * OX_HEAD - c * OY_HEAD
-    y0 = ty + OY_SKIN - b * OX_HEAD - d * OY_HEAD
+    y0 = ty + OY_SKIN - b * OX_HEAD - d * OY_HEAD + vertical_adjust
     det = a * d - b * c
 
     inv_affine = (
@@ -109,7 +118,12 @@ def build_player_fixed_frames(
 
         old_head_image = heads[old_head_idx - 1]
         transformed_old = get_head_transform(f_info, old_head_image, body.size)
-        transformed_target = get_head_transform(f_info, target_head_image, body.size)
+        transformed_target = get_head_transform(
+            f_info,
+            target_head_image,
+            body.size,
+            vertical_adjust=HEAD_NECK_OVERLAP_Y,
+        )
 
         # Dilate the old head mask by 2px to catch antialiasing fringes and spires
         old_alpha = transformed_old.getchannel("A")
