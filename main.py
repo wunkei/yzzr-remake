@@ -15,6 +15,7 @@ WORLD_WIDTH = 2600
 GROUND_Y = 448
 GRAVITY = 1850
 DOUBLE_TAP_WINDOW = 0.30
+UPPERCUT_LAUNCH_SPEED = -480
 
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -654,6 +655,9 @@ class Enemy:
         self.w, self.h = (44, 58) if kind == 0 else (58, 78)
         self.rect = pygame.Rect(x, GROUND_Y - self.h, self.w, self.h)
         self.x = float(x)
+        self.y = float(self.rect.y)
+        self.vy = 0.0
+        self.airborne = False
         self.hp = self.max_hp = 42 if kind == 0 else 95
         self.speed = 78 if kind == 0 else 54
         self.attack_cd = random.uniform(0.3, 0.9)
@@ -665,21 +669,33 @@ class Enemy:
         self.attack_cd = max(0, self.attack_cd - dt)
         self.hurt_timer = max(0, self.hurt_timer - dt)
         self.flash = max(0, self.flash - dt)
+        if self.airborne:
+            self.y += self.vy * dt
+            self.vy += GRAVITY * dt
+            if self.y + self.h >= GROUND_Y:
+                self.y = float(GROUND_Y - self.h)
+                self.vy = 0.0
+                self.airborne = False
+            self.rect.y = round(self.y)
         dx = player.rect.centerx - self.rect.centerx
         self.facing = 1 if dx > 0 else -1
-        if abs(dx) > 46 and self.hurt_timer <= 0:
+        if not self.airborne and abs(dx) > 46 and self.hurt_timer <= 0:
             self.x += self.facing * self.speed * dt
         self.rect.x = round(self.x)
-        if abs(dx) < 60 and abs(player.rect.bottom - self.rect.bottom) < 30 and self.attack_cd <= 0:
+        if not self.airborne and abs(dx) < 60 and abs(player.rect.bottom - self.rect.bottom) < 30 and self.attack_cd <= 0:
             self.attack_cd = 1.25 if self.kind == 0 else 1.55
             player.take_hit(8 if self.kind == 0 else 13, self.rect.centerx)
 
-    def take_hit(self, damage, source_x):
+    def take_hit(self, damage, source_x, launch_speed=0):
         self.hp -= damage
         self.flash = 0.12
-        self.hurt_timer = 0.12
+        self.hurt_timer = max(self.hurt_timer, 0.12)
         self.x += 15 if self.rect.centerx > source_x else -15
         self.rect.x = round(self.x)
+        if launch_speed < 0:
+            self.vy = min(self.vy, launch_speed)
+            self.airborne = True
+            self.hurt_timer = max(self.hurt_timer, 0.28)
 
 
 class Bolt:
@@ -804,7 +820,8 @@ class Game:
             damage = round(damage * 1.5)
         for enemy in self.enemies:
             if enemy not in p.attack_targets and any(box.colliderect(enemy.rect) for box in boxes):
-                enemy.take_hit(damage, p.rect.centerx)
+                launch_speed = UPPERCUT_LAUNCH_SPEED if p.last_attack_kind == "up" else 0
+                enemy.take_hit(damage, p.rect.centerx, launch_speed)
                 p.attack_targets.add(enemy)
 
     def draw_background(self, camera):
