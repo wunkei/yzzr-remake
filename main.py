@@ -11,11 +11,20 @@ import pygame
 
 WIDTH, HEIGHT = 960, 540
 FPS = 60
+ANIMATION_FPS = 30
 WORLD_WIDTH = 2600
 GROUND_Y = 448
 GRAVITY = 1850
 DOUBLE_TAP_WINDOW = 0.30
 UPPERCUT_LAUNCH_SPEED = -480
+# Approximate original outgoing hardstun values, expressed in SWF animation frames.
+ATTACK_HITSTUN_FRAMES = {
+    "normal": 10,
+    "run": 14,
+    "up": 24,
+    "down": 18,
+    "air": 12,
+}
 
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -32,7 +41,7 @@ def has_complete_frame_set(directory, frame_count):
 class OriginalCharacterVisual:
     """Play the original base-character SWF frames using their registered pivot."""
 
-    FPS = 30  # The original game advances its MovieClips at 30 frames per second.
+    FPS = ANIMATION_FPS  # The original game advances its MovieClips at 30 frames per second.
     FRAME_COUNT = 413
     FIXED_SPRITE_DIR = ROOT / "python_assets" / "player0_fixed_frames"
     HEADLESS_SPRITE_DIR = ROOT / "python_assets" / "player0_headless_frames"
@@ -582,7 +591,6 @@ class Player:
 
     def attack(self, held_keys=None):
         if self.attack_cd <= 0 and self.hurt_timer <= 0:
-            self.attack_cd = 0.34
             self.attack_timer = 0.19
             self.combo = self.combo % 4 + 1
             run_attack = self.is_dashing and self.on_ground
@@ -605,14 +613,19 @@ class Player:
             self.current_attack_run = run_attack
             self.attack_active = True
             self.attack_targets.clear()
+            action = {
+                "run": "跑攻",
+                "up": "上挑",
+                "down": "下斩",
+                "air": "攻击1",
+            }.get(attack_kind, f"攻击{self.combo}")
+            minimum_cooldown = 0.48 if run_attack else 0.34
             if self.visual:
-                action = {
-                    "run": "跑攻",
-                    "up": "上挑",
-                    "down": "下斩",
-                    "air": "攻击1",
-                }.get(attack_kind, f"攻击{self.combo}")
+                action_start, action_end = self.visual.actions.get(action, (0, 0))
+                action_duration = (action_end - action_start + 1) / self.visual.FPS
+                minimum_cooldown = max(minimum_cooldown, action_duration + 0.06)
                 self.visual.play(action, loop=False, force=True)
+            self.attack_cd = minimum_cooldown
             if self.is_dashing:
                 self.dash_key = None
                 self.is_dashing = False
@@ -662,6 +675,9 @@ class Enemy:
         self.speed = 78 if kind == 0 else 54
         self.attack_cd = random.uniform(0.3, 0.9)
         self.hurt_timer = 0.0
+        # Mirrors the original EnemySkin 被攻击硬直 value (in SWF frames).
+        # Exported placeholder enemies have no per-monster data yet.
+        self.stun_resistance_frames = 0
         self.flash = 0.0
         self.facing = -1
 
@@ -682,14 +698,14 @@ class Enemy:
         if not self.airborne and abs(dx) > 46 and self.hurt_timer <= 0:
             self.x += self.facing * self.speed * dt
         self.rect.x = round(self.x)
-        if not self.airborne and abs(dx) < 60 and abs(player.rect.bottom - self.rect.bottom) < 30 and self.attack_cd <= 0:
+        if not self.airborne and self.hurt_timer <= 0 and abs(dx) < 60 and abs(player.rect.bottom - self.rect.bottom) < 30 and self.attack_cd <= 0:
             self.attack_cd = 1.25 if self.kind == 0 else 1.55
             player.take_hit(8 if self.kind == 0 else 13, self.rect.centerx)
 
-    def take_hit(self, damage, source_x, launch_speed=0):
+    def take_hit(self, damage, source_x, launch_speed=0, stun_duration=0.12):
         self.hp -= damage
         self.flash = 0.12
-        self.hurt_timer = max(self.hurt_timer, 0.12)
+        self.hurt_timer = max(self.hurt_timer, stun_duration)
         self.x += 15 if self.rect.centerx > source_x else -15
         self.rect.x = round(self.x)
         if launch_speed < 0:
@@ -821,7 +837,13 @@ class Game:
         for enemy in self.enemies:
             if enemy not in p.attack_targets and any(box.colliderect(enemy.rect) for box in boxes):
                 launch_speed = UPPERCUT_LAUNCH_SPEED if p.last_attack_kind == "up" else 0
-                enemy.take_hit(damage, p.rect.centerx, launch_speed)
+                stun_frames = max(
+                    0,
+                    ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10)
+                    - enemy.stun_resistance_frames,
+                )
+                stun_duration = stun_frames / ANIMATION_FPS
+                enemy.take_hit(damage, p.rect.centerx, launch_speed, stun_duration)
                 p.attack_targets.add(enemy)
 
     def draw_background(self, camera):
