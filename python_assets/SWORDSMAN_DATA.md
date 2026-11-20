@@ -58,6 +58,17 @@ prototype approximates that interval as the opening eight animation frames,
 ending with the first weapon hit window. Skills a9–a11 remain locked in the
 original default profile and have not been enabled in the prototype yet.
 
+Magic Flash's forward-and-return travel is encoded as an internal horizontal
+offset in the exported character animation, rather than `Player.x` root motion
+or `移动参数`. The normal standing-frame anchor is x=416.5 in the exported
+canvas. At skill frame 268 (relative action frame 10), the character's cyan
+hair center is at x=40, which the renderer's facing transform places about 377
+pixels forward of the anchor; by frame 275 (relative frame 17), its center is
+x=425.5, about 9 pixels from the anchor. The character/weapon frame renderer
+already preserves this travel, so adding a separate Python root-motion dash
+would double the movement. The two weapon hit windows are at SWF frames
+264–266 and 272–274.
+
 The Python prototype now reads the original player frame records for attack
 root motion and the down-slash gravity change. It still uses an action-duration
 lock instead of applying every `中断` record, uses a placeholder enemy body
