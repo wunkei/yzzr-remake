@@ -47,6 +47,12 @@ ATTACK_SKILL_TYPES = {
 }
 ATTACK_LOCK_FRAMES = {"normal": 8, "air": 8, "run": 11, "up": 12, "down": 23}
 COMBO_INPUT_WINDOW_FRAMES = 15
+# Skin.Xml's exact per-frame root motion is supplied outside the exported SWFs.
+# This small grounded combo lunge is an isolated provisional value, not a
+# recovered original coordinate; the duration is tied to the first hit frame.
+NORMAL_ATTACK_LUNGE_PX = 10
+NORMAL_ATTACK_LUNGE_FRAMES = 3
+DOWNSLASH_FIRST_HIT_OFFSET_FRAMES = 12
 
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -384,6 +390,20 @@ class OriginalCharacterVisual:
             )
         return boxes
 
+    def first_hit_frame(self, action):
+        """Return the first extracted weapon-hit frame inside an action clip."""
+        if not self.weapon_swf_sprite_id or action not in self.actions:
+            return None
+        start, end = self.actions[action]
+        sprite_data = self.weapon_hitbox_data.get(str(self.weapon_swf_sprite_id), {})
+        active_frames = sprite_data.get("active_frames", {})
+        hits = [
+            int(frame)
+            for frame, boxes in active_frames.items()
+            if boxes and start <= int(frame) <= end
+        ]
+        return min(hits) if hits else None
+
     def cycle_costume(self):
         if self.s4_costume_frames:
             self.costume_index = (self.costume_index + 1) % 2
@@ -530,6 +550,10 @@ class Player:
         self.attack_cd = 0.0
         self.attack_lock = 0.0
         self.combo_window = 0.0
+        self.attack_lunge_remaining = 0.0
+        self.attack_lunge_total = 0.0
+        self.attack_lunge_direction = 1
+        self.air_down_charge_timer = 0.0
         self.attack_timer = 0.0
         self.skill_cd = 0.0
         self.hurt_timer = 0.0
@@ -580,9 +604,23 @@ class Player:
         if direction:
             self.facing = direction
         self.x += self.vx * dt
+        if self.air_down_charge_timer > 0:
+            held = min(dt, self.air_down_charge_timer)
+            self.air_down_charge_timer -= held
+            self.vy = 0
+            fall_dt = dt - held
+        else:
+            fall_dt = dt
+        if fall_dt > 0:
+            self.vy += GRAVITY * fall_dt
+            self.y += self.vy * fall_dt
+        if self.attack_lunge_remaining > 0:
+            lunge_dt = min(dt, self.attack_lunge_remaining)
+            lunge_step = self.attack_lunge_total * lunge_dt / self.attack_lunge_remaining
+            self.x += lunge_step * self.attack_lunge_direction
+            self.attack_lunge_total -= lunge_step
+            self.attack_lunge_remaining -= lunge_dt
         self.x = clamp(self.x, 12, WORLD_WIDTH - self.rect.width - 12)
-        self.vy += GRAVITY * dt
-        self.y += self.vy * dt
         if self.y + self.rect.height >= GROUND_Y:
             self.y = GROUND_Y - self.rect.height
             self.vy = 0
@@ -638,8 +676,16 @@ class Player:
                 self.combo = self.combo % 4 + 1
                 self.combo_window = COMBO_INPUT_WINDOW_FRAMES / ANIMATION_FPS
                 skill_type = ATTACK_SKILL_TYPES[f"normal{self.combo}"]
+                self.attack_lunge_total = NORMAL_ATTACK_LUNGE_PX
+                self.attack_lunge_direction = self.facing
             else:
                 skill_type = ATTACK_SKILL_TYPES[attack_kind]
+                self.attack_lunge_total = 0
+
+            self.attack_lunge_remaining = 0
+            self.air_down_charge_timer = 0
+            if attack_kind == "normal":
+                self.attack_lunge_remaining = NORMAL_ATTACK_LUNGE_FRAMES / ANIMATION_FPS
 
             self.attack_timer = 0.19
             if run_attack:
@@ -664,7 +710,23 @@ class Player:
                 action_start, action_end = self.visual.actions.get(action, (0, 0))
                 action_duration = (action_end - action_start + 1) / self.visual.FPS
                 self.attack_lock = max(self.attack_lock, action_duration)
+                if attack_kind == "normal":
+                    first_hit = self.visual.first_hit_frame(action)
+                    if first_hit is not None:
+                        lunge_frames = max(1, first_hit - action_start)
+                        self.attack_lunge_remaining = lunge_frames / self.visual.FPS
                 self.visual.play(action, loop=False, force=True)
+            if attack_kind == "down" and not self.on_ground:
+                first_hit = self.visual.first_hit_frame(action) if self.visual else None
+                action_start = self.visual.actions[action][0] if self.visual and action in self.visual.actions else 0
+                charge_frames = (
+                    max(0, first_hit - action_start)
+                    if first_hit is not None
+                    else DOWNSLASH_FIRST_HIT_OFFSET_FRAMES
+                )
+                fps = self.visual.FPS if self.visual else ANIMATION_FPS
+                self.air_down_charge_timer = charge_frames / fps
+                self.vy = 0
             self.attack_cd = minimum_cooldown
             if run_attack:
                 self.run_attack_timer = self.attack_lock
@@ -702,6 +764,8 @@ class Player:
         self.hurt_timer = 0.18
         self.attack_active = False
         self.attack_lock = 0
+        self.attack_lunge_remaining = 0
+        self.air_down_charge_timer = 0
         self.vx = -260 if source_x > self.rect.centerx else 260
         self.vy = -190
         if self.visual:

@@ -42,6 +42,14 @@ the player's final hitstun/launch/knockback values without the external
 `Skin.PlayerXml` data. Its current action-duration lock, enemy body rectangle,
 and outgoing hitstun/launch values are implementation approximations.
 
+The port now also gives grounded normal attacks a small forward root-motion
+step even with no movement key held. Its 10-pixel distance is an exposed
+provisional value because the original `移动参数.X` value is in the missing
+player XML. For an airborne down slash, vertical motion pauses until the first
+extracted sword-hit frame (12 frames after the slash begins for sword 1681),
+then gravity resumes. This reproduces the observed charge/hold/release order;
+the original per-frame gravity numbers are still unavailable.
+
 Other original data already extracted and used by the Python port:
 
 - `player0_fixed_frames/`: swordsman animation frames.
