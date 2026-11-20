@@ -16,8 +16,10 @@ WORLD_WIDTH = 2600
 GROUND_Y = 448
 GRAVITY = 1850
 DOUBLE_TAP_WINDOW = 0.30
+# Per-frame Skin.Xml contains additional hardstun/launch values. It is supplied
+# by the original game at runtime and is not present in the exported SWFs.
+# Keep this explicit approximation isolated until that runtime data is captured.
 UPPERCUT_LAUNCH_SPEED = -480
-# Approximate original outgoing hardstun values, expressed in SWF animation frames.
 ATTACK_HITSTUN_FRAMES = {
     "normal": 10,
     "run": 14,
@@ -25,6 +27,26 @@ ATTACK_HITSTUN_FRAMES = {
     "down": 18,
     "air": 12,
 }
+SWORDSMAN_SKILL_FILE = Path(__file__).resolve().parent / "python_assets" / "original_swordsman_skills.json"
+try:
+    with SWORDSMAN_SKILL_FILE.open("r", encoding="utf-8") as skill_file:
+        _skill_rows = json.load(skill_file).get("records", [])
+    SWORDSMAN_SKILLS = {row["skill_type"]: row for row in _skill_rows}
+except (OSError, ValueError, KeyError, TypeError):
+    SWORDSMAN_SKILLS = {}
+
+ATTACK_SKILL_TYPES = {
+    "normal1": "a1",
+    "normal2": "a2",
+    "normal3": "a3",
+    "normal4": "a4",
+    "run": "a5",
+    "up": "a6",
+    "down": "a7",
+    "air": "a1",
+}
+ATTACK_LOCK_FRAMES = {"normal": 8, "air": 8, "run": 11, "up": 12, "down": 23}
+COMBO_INPUT_WINDOW_FRAMES = 15
 
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -506,6 +528,8 @@ class Player:
         self.mp = self.max_mp = 60
         self.on_ground = True
         self.attack_cd = 0.0
+        self.attack_lock = 0.0
+        self.combo_window = 0.0
         self.attack_timer = 0.0
         self.skill_cd = 0.0
         self.hurt_timer = 0.0
@@ -567,7 +591,9 @@ class Player:
             self.on_ground = False
         self.rect.topleft = round(self.x), round(self.y)
         if self.visual:
-            if not self.on_ground:
+            if self.hurt_timer > 0:
+                self.visual.request("被打")
+            elif not self.on_ground:
                 self.visual.request("跳")
             elif direction:
                 self.visual.request("跑" if sprinting else "走")
@@ -575,6 +601,10 @@ class Player:
                 self.visual.request("站")
             self.visual.update(dt)
         self.attack_cd = max(0, self.attack_cd - dt)
+        self.attack_lock = max(0, self.attack_lock - dt)
+        self.combo_window = max(0, self.combo_window - dt)
+        if self.combo_window <= 0:
+            self.combo = 0
         self.attack_timer = max(0, self.attack_timer - dt)
         self.run_attack_timer = max(0, self.run_attack_timer - dt)
         self.skill_cd = max(0, self.skill_cd - dt)
@@ -590,25 +620,30 @@ class Player:
                 self.visual.play("跳", loop=True, force=True)
 
     def attack(self, held_keys=None):
-        if self.attack_cd <= 0 and self.hurt_timer <= 0:
-            self.attack_timer = 0.19
-            self.combo = self.combo % 4 + 1
+        if self.attack_cd <= 0 and self.attack_lock <= 0 and self.hurt_timer <= 0:
             run_attack = self.is_dashing and self.on_ground
-            attack_kind = "normal"
+            held_keys = held_keys or pygame.key.get_pressed()
             if run_attack:
-                self.attack_cd = 0.48
-                self.attack_timer = 0.24
-                self.run_attack_timer = 0.24
-                self.combo = 0
                 attack_kind = "run"
+            elif held_keys[pygame.K_w] or held_keys[pygame.K_UP]:
+                attack_kind = "up"
+            elif held_keys[pygame.K_s] or held_keys[pygame.K_DOWN]:
+                attack_kind = "down"
+            elif not self.on_ground:
+                attack_kind = "air"
             else:
-                held_keys = held_keys or pygame.key.get_pressed()
-                if held_keys[pygame.K_w] or held_keys[pygame.K_UP]:
-                    attack_kind = "up"
-                elif held_keys[pygame.K_s] or held_keys[pygame.K_DOWN]:
-                    attack_kind = "down"
-                elif not self.on_ground:
-                    attack_kind = "air"
+                attack_kind = "normal"
+
+            if attack_kind == "normal":
+                self.combo = self.combo % 4 + 1
+                self.combo_window = COMBO_INPUT_WINDOW_FRAMES / ANIMATION_FPS
+                skill_type = ATTACK_SKILL_TYPES[f"normal{self.combo}"]
+            else:
+                skill_type = ATTACK_SKILL_TYPES[attack_kind]
+
+            self.attack_timer = 0.19
+            if run_attack:
+                self.attack_timer = 0.24
             self.last_attack_kind = attack_kind
             self.current_attack_run = run_attack
             self.attack_active = True
@@ -619,13 +654,20 @@ class Player:
                 "down": "下斩",
                 "air": "攻击1",
             }.get(attack_kind, f"攻击{self.combo}")
-            minimum_cooldown = 0.48 if run_attack else 0.34
+            skill = SWORDSMAN_SKILLS.get(skill_type, {})
+            skill_cd_frames = int(skill.get("cooldown", 0) or 0)
+            skill_cooldown = skill_cd_frames / ANIMATION_FPS
+            lock_frames = ATTACK_LOCK_FRAMES.get(attack_kind, 8)
+            self.attack_lock = lock_frames / ANIMATION_FPS
+            minimum_cooldown = skill_cooldown
             if self.visual:
                 action_start, action_end = self.visual.actions.get(action, (0, 0))
                 action_duration = (action_end - action_start + 1) / self.visual.FPS
-                minimum_cooldown = max(minimum_cooldown, action_duration + 0.06)
+                self.attack_lock = max(self.attack_lock, action_duration)
                 self.visual.play(action, loop=False, force=True)
             self.attack_cd = minimum_cooldown
+            if run_attack:
+                self.run_attack_timer = self.attack_lock
             if self.is_dashing:
                 self.dash_key = None
                 self.is_dashing = False
@@ -658,8 +700,12 @@ class Player:
         self.hp = max(0, self.hp - damage)
         self.invincible = 0.65
         self.hurt_timer = 0.18
+        self.attack_active = False
+        self.attack_lock = 0
         self.vx = -260 if source_x > self.rect.centerx else 260
         self.vy = -190
+        if self.visual:
+            self.visual.play("被打", loop=True, force=True)
 
 
 class Enemy:
@@ -831,9 +877,13 @@ class Game:
 
         if not boxes:
             return
-        damage = 17 + (p.level - 1) * 3 + p.combo * 2
-        if p.current_attack_run:
-            damage = round(damage * 1.5)
+        if p.last_attack_kind == "normal":
+            skill_type = ATTACK_SKILL_TYPES[f"normal{p.combo}"]
+        else:
+            skill_type = ATTACK_SKILL_TYPES.get(p.last_attack_kind, "a1")
+        skill = SWORDSMAN_SKILLS.get(skill_type, {})
+        multiplier = float(skill.get("values", {}).get("数值1", "0.8"))
+        damage = round((17 + (p.level - 1) * 3) * multiplier)
         for enemy in self.enemies:
             if enemy not in p.attack_targets and any(box.colliderect(enemy.rect) for box in boxes):
                 launch_speed = UPPERCUT_LAUNCH_SPEED if p.last_attack_kind == "up" else 0
