@@ -3,8 +3,9 @@
 The extracted action table is in `original_swordsman_skills.xml` (source-shaped
 XML) and `original_swordsman_skills.json` (compact, readable records). It comes
 from `DataX_v1920.swf`'s `InData_SkillData` embedded binary resource and contains
-the sword fighter's `a1`–`a7` actions: four basic combo steps, running attack,
-uppercut, and downward slash. This source has one record per action at level 1.
+the sword fighter's `a1`–`a8` actions: four basic combo steps, running attack,
+uppercut, downward slash, and the first active skill, 魔光闪. Skill a8 has
+multiple level records; the prototype reads its level-1 data.
 
 The player animation-frame rules are extracted separately to
 `original_swordsman_player_frames.xml` and `.json`. Their source is
@@ -14,7 +15,7 @@ loaded from a server. They provide each action's `硬直`, `重力调整`,
 `移动参数`, interruptibility and hit effect values.
 
 The table supplies skill multipliers, cooldowns, hit counts, damage limits, and
-skill-added hardstun/launch/knockback/duration. For these seven level-1 actions,
+skill-added hardstun/launch/knockback/duration. For these eight level-1 actions,
 the skill-added values are zero; `Skin.as` combines them with the per-frame
 values above to get the actual result.
 
@@ -27,6 +28,7 @@ values above to get the actual result.
 | Running attack | a5 | 0.90 | 27 | 11 | 79–87 |
 | Uppercut | a6 | 0.85 | 36 | 12 | 95–97 |
 | Down slash | a7 | 0.90 | 27 | 23 | 114–120 |
+| Magic Flash (魔光闪) | a8 | 0.78 per hit, 2 hits | 120 | 19 | 264–266, 272–274 |
 
 The original input priority is running attack, up + attack, down + attack,
 air attack 1, then grounded combo. Running attack comes from a double-tap of a
@@ -47,6 +49,14 @@ action can start. Thus after the uppercut animation finishes, a basic attack
 can start immediately while another uppercut remains unavailable until `a6`
 recovers. The Python port now tracks each selected skill's cooldown separately
 from its action-duration lock.
+
+The default player data has `a8` at level 1 and `a9`–`a11` at level 0. The
+prototype now binds Skill 1 (`a8`, 魔光闪) to `1`, uses the original `技能1`
+character/weapon animation, and resolves its two separate weapon hit windows.
+The original description says the piercing portion is invulnerable; the
+prototype approximates that interval as the opening eight animation frames,
+ending with the first weapon hit window. Skills a9–a11 remain locked in the
+original default profile and have not been enabled in the prototype yet.
 
 The Python prototype now reads the original player frame records for attack
 root motion and the down-slash gravity change. It still uses an action-duration

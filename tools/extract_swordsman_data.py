@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = ROOT / "DataX_v1920" / "binaryData" / "74_src.InData_SkillData.bin"
 DEFAULT_XML = ROOT / "python_assets" / "original_swordsman_skills.xml"
 DEFAULT_JSON = ROOT / "python_assets" / "original_swordsman_skills.json"
-SKILL_IDS = {f"a{i}" for i in range(1, 8)}
+SKILL_IDS = {f"a{i}" for i in range(1, 9)}
 
 
 def extract(source: Path) -> tuple[ET.Element, list[dict[str, object]]]:
@@ -32,6 +32,7 @@ def extract(source: Path) -> tuple[ET.Element, list[dict[str, object]]]:
             "skill_type": skill_type,
             "level": node.findtext("技能等级"),
             "name": node.findtext("技能名称"),
+            "description": node.findtext("技能描述"),
             "frames": node.findtext("帧数"),
             "cooldown": node.findtext("技能冷却"),
             "duration": node.findtext("持续时间"),
@@ -61,7 +62,7 @@ def main() -> None:
         json.dumps({
             "source": "DataX_v1920.swf / InData_SkillData",
             "source_md5_expected": "4403453a814caa72e285c76e9ec5084a",
-            "skill_types": [f"a{i}" for i in range(1, 8)],
+            "skill_types": [f"a{i}" for i in range(1, 9)],
             "records": records,
         }, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

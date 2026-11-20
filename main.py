@@ -27,7 +27,9 @@ SWORDSMAN_SKILL_FILE = Path(__file__).resolve().parent / "python_assets" / "orig
 try:
     with SWORDSMAN_SKILL_FILE.open("r", encoding="utf-8") as skill_file:
         _skill_rows = json.load(skill_file).get("records", [])
-    SWORDSMAN_SKILLS = {row["skill_type"]: row for row in _skill_rows}
+    SWORDSMAN_SKILLS = {
+        row["skill_type"]: row for row in _skill_rows if str(row.get("level")) == "1"
+    }
 except (OSError, ValueError, KeyError, TypeError):
     SWORDSMAN_SKILLS = {}
 
@@ -50,8 +52,11 @@ ATTACK_SKILL_TYPES = {
     "up": "a6",
     "down": "a7",
     "air": "a1",
+    "skill1": "a8",
 }
 ATTACK_LOCK_FRAMES = {"normal": 8, "air": 8, "run": 11, "up": 12, "down": 23}
+SKILL_ACTIONS = {"skill1": "技能1"}
+SKILL_HIT_WINDOWS = {"skill1": ((6, 8), (14, 16))}
 COMBO_INPUT_WINDOW_FRAMES = 15
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -588,6 +593,7 @@ class Player:
         self.run_attack_timer = 0.0
         self.attack_active = False
         self.attack_targets = set()
+        self.skill_hit_targets = {}
         self.current_attack_run = False
         self.last_attack_kind = "normal"
 
@@ -686,11 +692,13 @@ class Player:
             if self.visual:
                 self.visual.play("跳", loop=True, force=True)
 
-    def attack(self, held_keys=None):
+    def attack(self, held_keys=None, requested_kind=None):
         if self.attack_lock <= 0 and self.hurt_timer <= 0:
-            run_attack = self.is_dashing and self.on_ground
+            run_attack = requested_kind is None and self.is_dashing and self.on_ground
             held_keys = held_keys or pygame.key.get_pressed()
-            if run_attack:
+            if requested_kind:
+                attack_kind = requested_kind
+            elif run_attack:
                 attack_kind = "run"
             elif held_keys[pygame.K_w] or held_keys[pygame.K_UP]:
                 attack_kind = "up"
@@ -716,7 +724,7 @@ class Player:
                 "up": "上挑",
                 "down": "下斩",
                 "air": "攻击1",
-            }.get(attack_kind, f"攻击{self.combo}")
+            }.get(attack_kind, SKILL_ACTIONS.get(attack_kind, f"攻击{self.combo}"))
 
             self.attack_motion_steps = []
             self.attack_motion_index = 0
@@ -736,6 +744,7 @@ class Player:
             self.current_attack_run = run_attack
             self.attack_active = True
             self.attack_targets.clear()
+            self.skill_hit_targets.clear()
             skill = SWORDSMAN_SKILLS.get(skill_type, {})
             skill_cd_frames = int(skill.get("cooldown", 0) or 0)
             skill_cooldown = skill_cd_frames / ANIMATION_FPS
@@ -757,6 +766,10 @@ class Player:
                 self.vy = 0
             if skill_cooldown > 0:
                 self.skill_cooldowns[skill_type] = skill_cooldown
+            if attack_kind == "skill1":
+                # The source skill description grants invulnerability during
+                # the opening thrust; its first weapon hit window ends at frame 8.
+                self.invincible = max(self.invincible, 8 / ANIMATION_FPS)
             if run_attack:
                 self.run_attack_timer = self.attack_lock
             if self.is_dashing:
@@ -909,6 +922,9 @@ class Game:
         elif key in (pygame.K_j, pygame.K_z):
             if p.attack(pygame.key.get_pressed()) and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
+        elif key == pygame.K_1:
+            if p.attack(requested_kind="skill1") and (not p.visual or not p.visual.available):
+                self.resolve_player_attack()
         elif key == pygame.K_v and p.visual:
             p.visual.cycle_weapon()
         elif key == pygame.K_c and p.visual:
@@ -975,7 +991,7 @@ class Game:
         else:
             skill_type = ATTACK_SKILL_TYPES.get(p.last_attack_kind, "a1")
             action = {"run": "跑攻", "up": "上挑", "down": "下斩", "air": "攻击1"}.get(
-                p.last_attack_kind, "攻击1"
+                p.last_attack_kind, SKILL_ACTIONS.get(p.last_attack_kind, "攻击1")
             )
         skill = SWORDSMAN_SKILLS.get(skill_type, {})
         multiplier = float(skill.get("values", {}).get("数值1", "0.8"))
@@ -985,13 +1001,25 @@ class Game:
         if p.visual and action in p.visual.actions:
             action_start, _action_end = p.visual.actions[action]
             relative_frame = max(1, p.visual.frame - action_start + 1)
+        hit_group = None
+        if p.last_attack_kind in SKILL_HIT_WINDOWS:
+            hit_group = next(
+                (index for index, (start, end) in enumerate(SKILL_HIT_WINDOWS[p.last_attack_kind])
+                 if start <= relative_frame <= end),
+                None,
+            )
         active_rows = [frame for frame in action_rows if frame <= relative_frame]
         frame_data = action_rows[max(active_rows)] if active_rows else action_rows.get(1, {})
         attacker_hardstun = int(
             frame_data.get("hardstun", FALLBACK_ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10))
         )
         for enemy in self.enemies:
-            if enemy not in p.attack_targets and any(box.colliderect(enemy.rect) for box in boxes):
+            if p.last_attack_kind in SKILL_HIT_WINDOWS:
+                hit_groups = p.skill_hit_targets.setdefault(enemy, set())
+                can_hit = hit_group is not None and hit_group not in hit_groups
+            else:
+                can_hit = enemy not in p.attack_targets
+            if can_hit and any(box.colliderect(enemy.rect) for box in boxes):
                 launch_speed = UPPERCUT_LAUNCH_SPEED if p.last_attack_kind == "up" else 0
                 stun_frames = max(
                     0,
@@ -999,7 +1027,10 @@ class Game:
                 )
                 stun_duration = stun_frames / ANIMATION_FPS
                 enemy.take_hit(damage, p.rect.centerx, launch_speed, stun_duration)
-                p.attack_targets.add(enemy)
+                if p.last_attack_kind in SKILL_HIT_WINDOWS:
+                    hit_groups.add(hit_group)
+                else:
+                    p.attack_targets.add(enemy)
 
     def draw_background(self, camera):
         self.screen.fill(SKY)
@@ -1072,7 +1103,7 @@ class Game:
         self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
         self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
         self.screen.blit(self.font.render(f"关卡 {self.wave}/3", True, WHITE), (WIDTH - 112, 22))
-        controls = "双击 A/D 或方向键冲刺   冲刺中 J/Z 跑攻   Shift 加速   K 跳跃   V 换剑   C 换装"
+        controls = "双击 A/D 冲刺   J/Z 攻击   1 魔光闪   Shift 加速   K 跳跃   V 换剑   C 换装"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
         if self.game_over or self.victory:
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
