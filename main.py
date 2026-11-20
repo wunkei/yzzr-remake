@@ -53,10 +53,42 @@ ATTACK_SKILL_TYPES = {
     "down": "a7",
     "air": "a1",
     "skill1": "a8",
+    "skill2": "a9",
+    "skill3": "a10",
+    "skill4": "a11",
 }
-ATTACK_LOCK_FRAMES = {"normal": 8, "air": 8, "run": 11, "up": 12, "down": 23}
-SKILL_ACTIONS = {"skill1": "技能1"}
-SKILL_HIT_WINDOWS = {"skill1": ((6, 8), (14, 16))}
+ATTACK_LOCK_FRAMES = {
+    "normal": 8,
+    "air": 8,
+    "run": 11,
+    "up": 12,
+    "down": 23,
+    "skill1": 19,
+    "skill2": 40,
+    "skill3": 36,
+    "skill4": 46,
+}
+SKILL_ACTIONS = {
+    "skill1": "技能1",
+    "skill2": "技能2",
+    "skill3": "技能3",
+    "skill4": "技能4",
+}
+SKILL_HIT_WINDOWS = {
+    "skill1": ((6, 8), (14, 16)),
+    "skill2": (
+        (6, 9),
+        (10, 13),
+        (14, 17),
+        (18, 21),
+        (22, 25),
+        (26, 29),
+        (30, 33),
+        (35, 37),
+    ),
+    "skill3": ((5, 7), (15, 16), (18, 19), (21, 22), (24, 25), (27, 28)),
+    "skill4": ((35, 38),),
+}
 COMBO_INPUT_WINDOW_FRAMES = 15
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
@@ -123,6 +155,16 @@ class OriginalCharacterVisual:
         1168: {"scale": 1.00, "offset": (-10, 10)},
         1044: {"scale": 1.00, "offset": (-10, 10)},
     }
+    CHARACTER_CACHE_DIR = ROOT / "python_assets" / "character_cache"
+    CHARACTER_CACHE_MANIFEST = CHARACTER_CACHE_DIR / "manifest.json"
+    COSTUME_KEYS = ("default", "s4")
+    WEAPON_KEYS = ("gold9", "gold11", "blue1", "blue4")
+    WEAPON_REGISTERS = {
+        1235: (-129, -931),
+        1108: (-335, -928),
+        1168: (-169, -933),
+        1044: (-123, -933),
+    }
 
     def __init__(self):
         self.frames = []
@@ -158,10 +200,68 @@ class OriginalCharacterVisual:
         self.weapon_register = None
         self.weapon_offset = (0, 0)
         self.weapon_hitbox_data = {}
+        self.use_cache = False
+        self._cached_combos = {}
+        self._active_combo_frames = None
+        self._cache_manifest = None
         if self.WEAPON_HITBOX_MANIFEST.is_file():
             with self.WEAPON_HITBOX_MANIFEST.open("r", encoding="utf-8") as hitbox_file:
                 self.weapon_hitbox_data = json.load(hitbox_file).get("sprites", {})
+        if self._try_load_cache():
+            return
         self._load_original_frames()
+
+    def _try_load_cache(self):
+        if not self.CHARACTER_CACHE_MANIFEST.is_file() or not self.TIMELINE_FILE.is_file():
+            return False
+        try:
+            with self.CHARACTER_CACHE_MANIFEST.open("r", encoding="utf-8") as manifest_file:
+                self._cache_manifest = json.load(manifest_file)
+            with self.TIMELINE_FILE.open("r", encoding="utf-8") as timeline_file:
+                sprite = json.load(timeline_file)["sprites"]["248"]
+            self.actions = {
+                label["name"]: (label["frame"], label["end_frame"])
+                for label in sprite["labels"]
+            }
+            self.canvas_width = 800
+            self.anchor_x = 416
+            self.anchor_y = 219
+            self.use_cache = True
+            self.costume_index = 0
+            self.weapon_index = 0
+            self._set_active_combo(0, 0)
+            self.available = bool(self._active_combo_frames and self.actions)
+            if self.available:
+                self.play("站", loop=True, force=True)
+            return self.available
+        except Exception:
+            self.use_cache = False
+            return False
+
+    def _set_active_combo(self, costume_index, weapon_index):
+        weapon_id, _sprite_name = self.WEAPONS[weapon_index]
+        self.weapon_swf_sprite_id = self.WEAPON_SWF_SPRITE_IDS.get(weapon_id)
+        self.weapon_register = self.WEAPON_REGISTERS.get(weapon_id, (-129, -931))
+        self.weapon_offset = self.WEAPON_TUNING[weapon_id]["offset"]
+
+        combo_key = f"{self.COSTUME_KEYS[costume_index]}_{self.WEAPON_KEYS[weapon_index]}"
+        if combo_key not in self._cached_combos:
+            combo_dir = self.CHARACTER_CACHE_DIR / combo_key
+            info_dict = self._cache_manifest.get("combinations", {}).get(combo_key, {})
+            frames = [None] * self.FRAME_COUNT
+            for f_str, meta in info_dict.items():
+                f_num = int(f_str)
+                w, h = meta.get("size", (0, 0))
+                if w > 0 and h > 0:
+                    img_path = combo_dir / f"{f_num}.png"
+                    if img_path.is_file():
+                        surf_left = pygame.image.load(str(img_path)).convert_alpha()
+                        surf_right = pygame.transform.flip(surf_left, True, False)
+                        ox, oy = meta["offset"]
+                        ox_right = -ox - w
+                        frames[f_num - 1] = ((surf_left, ox, oy), (surf_right, ox_right, oy))
+            self._cached_combos[combo_key] = frames
+        self._active_combo_frames = self._cached_combos[combo_key]
 
     def _load_original_frames(self):
         if not self.TIMELINE_FILE.exists() or not self.SPRITE_DIR.is_dir():
@@ -350,7 +450,10 @@ class OriginalCharacterVisual:
             self.weapon_sword_frames = []
 
     def cycle_weapon(self):
-        if self.available:
+        if self.use_cache:
+            self.weapon_index = (self.weapon_index + 1) % len(self.WEAPONS)
+            self._set_active_combo(self.costume_index, self.weapon_index)
+        elif self.available:
             self._load_weapon((self.weapon_index + 1) % len(self.WEAPONS))
 
     def hitboxes_at(self, world_x, world_bottom, facing):
@@ -409,7 +512,10 @@ class OriginalCharacterVisual:
         return min(hits) if hits else None
 
     def cycle_costume(self):
-        if self.s4_costume_frames:
+        if self.use_cache:
+            self.costume_index = (self.costume_index + 1) % len(self.COSTUME_KEYS)
+            self._set_active_combo(self.costume_index, self.weapon_index)
+        elif self.s4_costume_frames:
             self.costume_index = (self.costume_index + 1) % 2
 
     def request(self, action):
@@ -469,6 +575,12 @@ class OriginalCharacterVisual:
     def draw(self, screen, world_x, world_bottom, facing):
         if not self.available:
             return False
+        if self.use_cache:
+            entry = self._active_combo_frames[self.frame - 1]
+            if entry is not None:
+                surf, ox, oy = entry[0 if facing <= 0 else 1]
+                screen.blit(surf, (round(world_x + ox), round(world_bottom + oy)))
+            return True
         body_frames = self.s4_body_frames if self.costume_index else self.frames
         surface, box = body_frames[self.frame - 1]
         if surface is None:
@@ -636,11 +748,17 @@ class Player:
             self.air_down_charge_timer = max(0, self.air_down_charge_timer - dt)
             self.vy = 0
             if self.air_down_charge_timer == 0:
-                # Align the inferred landing with the original weapon's first
-                # active down-slash frame so its hitbox resolves at ground level.
-                self.y = GROUND_Y - self.rect.height
-                self.on_ground = True
-            fall_dt = 0
+                if self.last_attack_kind == "down":
+                    self.y = GROUND_Y - self.rect.height
+                    self.on_ground = True
+                    fall_dt = 0
+                elif self.last_attack_kind == "skill2":
+                    self.vy = 450
+                    fall_dt = dt
+                else:
+                    fall_dt = dt
+            else:
+                fall_dt = 0
         else:
             fall_dt = dt
         if fall_dt > 0:
@@ -770,6 +888,15 @@ class Player:
                 # The source skill description grants invulnerability during
                 # the opening thrust; its first weapon hit window ends at frame 8.
                 self.invincible = max(self.invincible, 8 / ANIMATION_FPS)
+            elif attack_kind == "skill2":
+                self.vy = -340
+                self.on_ground = False
+                self.air_down_charge_timer = 28 / ANIMATION_FPS
+            elif attack_kind == "skill3":
+                self.attack_motion_steps = [(12, 0)] * 16
+            elif attack_kind == "skill4":
+                self.invincible = max(self.invincible, 14 / ANIMATION_FPS)
+                self.attack_motion_steps = [(4, 0)] * 10
             if run_attack:
                 self.run_attack_timer = self.attack_lock
             if self.is_dashing:
@@ -922,10 +1049,19 @@ class Game:
         elif key in (pygame.K_j, pygame.K_z):
             if p.attack(pygame.key.get_pressed()) and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
-        elif key == pygame.K_1:
+        elif key in (pygame.K_h, pygame.K_1):
             if p.attack(requested_kind="skill1") and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
-        elif key == pygame.K_v and p.visual:
+        elif key in (pygame.K_u, pygame.K_2):
+            if p.attack(requested_kind="skill2") and (not p.visual or not p.visual.available):
+                self.resolve_player_attack()
+        elif key in (pygame.K_i, pygame.K_3):
+            if p.attack(requested_kind="skill3") and (not p.visual or not p.visual.available):
+                self.resolve_player_attack()
+        elif key in (pygame.K_o, pygame.K_4):
+            if p.attack(requested_kind="skill4") and (not p.visual or not p.visual.available):
+                self.resolve_player_attack()
+        elif key in (pygame.K_l, pygame.K_v) and p.visual:
             p.visual.cycle_weapon()
         elif key == pygame.K_c and p.visual:
             p.visual.cycle_costume()
@@ -1020,7 +1156,14 @@ class Game:
             else:
                 can_hit = enemy not in p.attack_targets
             if can_hit and any(box.colliderect(enemy.rect) for box in boxes):
-                launch_speed = UPPERCUT_LAUNCH_SPEED if p.last_attack_kind == "up" else 0
+                if p.last_attack_kind == "up":
+                    launch_speed = UPPERCUT_LAUNCH_SPEED
+                elif p.last_attack_kind == "skill2":
+                    launch_speed = -300 if relative_frame >= 35 else 60
+                elif p.last_attack_kind == "skill4":
+                    launch_speed = -400
+                else:
+                    launch_speed = 0
                 stun_frames = max(
                     0,
                     attacker_hardstun - enemy.stun_resistance_frames,
@@ -1103,7 +1246,26 @@ class Game:
         self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
         self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
         self.screen.blit(self.font.render(f"关卡 {self.wave}/3", True, WHITE), (WIDTH - 112, 22))
-        controls = "双击 A/D 冲刺   J/Z 攻击   1 魔光闪   Shift 加速   K 跳跃   V 换剑   C 换装"
+
+        # Skill cooldown indicator badges
+        skill_keys = [
+            ("H", "魔光闪", "a8"),
+            ("U", "断空追击", "a9"),
+            ("I", "风切", "a10"),
+            ("O", "皇龙斩", "a11"),
+        ]
+        hud_skill_x = WIDTH - 390
+        for i, (k_name, s_name, s_type) in enumerate(skill_keys):
+            cd = p.skill_cooldowns.get(s_type, 0)
+            if cd > 0:
+                txt = f"{k_name}: {cd:.1f}s"
+                col = (170, 175, 185)
+            else:
+                txt = f"{k_name}: {s_name}"
+                col = (105, 235, 135)
+            self.screen.blit(self.font.render(txt, True, col), (hud_skill_x + i * 95, 52))
+
+        controls = "双击 A/D 冲刺   J 攻击   K 跳跃   H/U/I/O 技能1-4   L 换剑   C 换装"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
         if self.game_over or self.victory:
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)

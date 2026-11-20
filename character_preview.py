@@ -56,13 +56,21 @@ def main():
                 elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
                     attack_number = event.key - pygame.K_0
                     visual.play(f"攻击{attack_number}", loop=False, force=True)
-                elif event.key == pygame.K_v:
+                elif event.key == pygame.K_h:
+                    visual.play("技能1", loop=False, force=True)
+                elif event.key == pygame.K_u:
+                    visual.play("技能2", loop=False, force=True)
+                elif event.key == pygame.K_i:
+                    visual.play("技能3", loop=False, force=True)
+                elif event.key == pygame.K_o:
+                    visual.play("技能4", loop=False, force=True)
+                elif event.key in (pygame.K_l, pygame.K_v):
                     visual.cycle_weapon()
                 elif event.key == pygame.K_c:
                     visual.cycle_costume()
                 elif event.key == pygame.K_b:
                     dark_background = not dark_background
-                elif event.key == pygame.K_h:
+                elif event.key == pygame.K_p:
                     show_hitboxes = not show_hitboxes
                 elif event.key == pygame.K_r:
                     x = WIDTH / 2
@@ -108,7 +116,7 @@ def main():
                 pygame.draw.rect(screen, (255, 55, 45), hitbox, 2)
 
         hint = pygame.font.Font(None, 21).render(
-            "A/D 移动  Shift 跑  Space 跳  W/S+J 上挑/下斩  J/Z 攻击  H 判定框  1-4 动作  V 换剑  C 换装  B 背景  R 归中  Esc 退出",
+            "A/D 移动  Shift 跑  K 跳  W/S+J 上挑/下斩  J 攻击  H/U/I/O 技能1-4  P 判定框  L 换剑  C 换装  B 背景  R 归中  Esc 退出",
             True,
             hint_color,
         )
