@@ -16,9 +16,11 @@ WORLD_WIDTH = 2600
 GROUND_Y = 448
 GRAVITY = 1850
 DOUBLE_TAP_WINDOW = 0.30
-# X0 PlayerXML gives the uppercut a 260-pixel launch over 11 SWF ticks. The
-# placeholder enemy model still converts that displacement to a simple velocity.
-UPPERCUT_LAUNCH_SPEED = -480
+# The tutorial character/enemy SWFs define these Hit shapes in twips.
+PLAYER_HITBOX_SIZE = (42, 89)
+ENEMY_HITBOX_SIZE = (60, 100)
+ENEMY_ATTACK_HITBOX = (-12, -97, 32, 33)
+ENEMY_ATTACK_FRAMES = (34, 51)
 # Placeholder enemies use the common 100-tick EnemySkin resistance as a base;
 # actual monsters can differ and need their own EnemySkin data.
 DEFAULT_ENEMY_HURTSTUN_FRAMES = 100
@@ -74,24 +76,15 @@ SKILL_ACTIONS = {
     "skill3": "技能3",
     "skill4": "技能4",
 }
-SKILL_HIT_WINDOWS = {
-    "skill1": ((6, 8), (14, 16)),
-    "skill2": (
-        (6, 9),
-        (10, 13),
-        (14, 17),
-        (18, 21),
-        (22, 25),
-        (26, 29),
-        (30, 33),
-        (35, 37),
-    ),
-    "skill3": ((5, 7), (15, 16), (18, 19), (21, 22), (24, 25), (27, 28)),
-    "skill4": ((35, 38),),
-}
 COMBO_INPUT_WINDOW_FRAMES = 15
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
+HITBOX_DEBUG_COLORS = {
+    "玩家受击": (55, 220, 255),
+    "敌人受击": (255, 85, 90),
+    "玩家攻击": (255, 225, 65),
+    "敌人攻击": (255, 155, 55),
+}
 ROOT = Path(__file__).resolve().parent
 
 
@@ -100,6 +93,47 @@ def has_complete_frame_set(directory, frame_count):
         (directory / f"{frame}.png").is_file()
         for frame in range(1, frame_count + 1)
     )
+
+
+def group_active_hit_frames(relative_frames, hit_count):
+    """Group contiguous SWF HitXX frames into the skill XML's configured hits."""
+    frames = sorted(set(relative_frames))
+    hit_count = min(max(0, int(hit_count)), len(frames))
+    if not frames or not hit_count:
+        return {}
+
+    runs = []
+    for frame in frames:
+        if not runs or frame != runs[-1][-1] + 1:
+            runs.append([frame])
+        else:
+            runs[-1].append(frame)
+
+    if hit_count < len(runs):
+        runs = sorted(runs, key=len, reverse=True)[:hit_count]
+
+    group_counts = [1] * len(runs)
+    remaining = hit_count - len(group_counts)
+    total_frames = sum(map(len, runs))
+    ideal = [hit_count * len(run) / total_frames for run in runs]
+    while remaining:
+        candidates = [i for i, run in enumerate(runs) if group_counts[i] < len(run)]
+        if not candidates:
+            break
+        chosen = max(candidates, key=lambda i: (ideal[i] - group_counts[i], len(runs[i])))
+        group_counts[chosen] += 1
+        remaining -= 1
+
+    grouped_frames = {}
+    group_id = 0
+    for run, count in zip(runs, group_counts):
+        for index in range(count):
+            start = index * len(run) // count
+            end = (index + 1) * len(run) // count
+            for frame in run[start:end]:
+                grouped_frames[frame] = group_id
+            group_id += 1
+    return grouped_frames
 
 
 class OriginalCharacterVisual:
@@ -166,7 +200,7 @@ class OriginalCharacterVisual:
         1044: (-123, -933),
     }
 
-    def __init__(self):
+    def __init__(self, load_cache=True):
         self.frames = []
         self.actions = {}
         self.anchor_x = 0
@@ -204,10 +238,11 @@ class OriginalCharacterVisual:
         self._cached_combos = {}
         self._active_combo_frames = None
         self._cache_manifest = None
+        self._hit_group_cache = {}
         if self.WEAPON_HITBOX_MANIFEST.is_file():
             with self.WEAPON_HITBOX_MANIFEST.open("r", encoding="utf-8") as hitbox_file:
                 self.weapon_hitbox_data = json.load(hitbox_file).get("sprites", {})
-        if self._try_load_cache():
+        if load_cache and self._try_load_cache():
             return
         self._load_original_frames()
 
@@ -511,6 +546,25 @@ class OriginalCharacterVisual:
         ]
         return min(hits) if hits else None
 
+    def hit_group_at(self, action, relative_frame, hit_count):
+        """Map active SWF HitXX frames onto the skill XML's configured hits."""
+        if not self.weapon_swf_sprite_id or action not in self.actions or hit_count <= 0:
+            return None
+        cache_key = (self.weapon_swf_sprite_id, action, hit_count)
+        if cache_key not in self._hit_group_cache:
+            action_start, action_end = self.actions[action]
+            sprite_data = self.weapon_hitbox_data.get(str(self.weapon_swf_sprite_id), {})
+            active_frames = sprite_data.get("active_frames", {})
+            relative_frames = sorted(
+                int(frame) - action_start + 1
+                for frame, boxes in active_frames.items()
+                if boxes and action_start <= int(frame) <= action_end
+            )
+            self._hit_group_cache[cache_key] = group_active_hit_frames(
+                relative_frames, hit_count
+            )
+        return self._hit_group_cache[cache_key].get(relative_frame)
+
     def cycle_costume(self):
         if self.use_cache:
             self.costume_index = (self.costume_index + 1) % len(self.COSTUME_KEYS)
@@ -583,16 +637,15 @@ class OriginalCharacterVisual:
             return True
         body_frames = self.s4_body_frames if self.costume_index else self.frames
         surface, box = body_frames[self.frame - 1]
-        if surface is None:
-            return True
-        left, top, right, _bottom = box
-        if facing > 0:
-            surface = pygame.transform.flip(surface, True, False)
-            draw_x = round(world_x + self.anchor_x - right)
-        else:
-            draw_x = round(world_x - self.anchor_x + left)
-        draw_y = round(world_bottom - self.anchor_y + top)
-        screen.blit(surface, (draw_x, draw_y))
+        if surface is not None:
+            left, top, right, _bottom = box
+            if facing > 0:
+                surface = pygame.transform.flip(surface, True, False)
+                draw_x = round(world_x + self.anchor_x - right)
+            else:
+                draw_x = round(world_x - self.anchor_x + left)
+            draw_y = round(world_bottom - self.anchor_y + top)
+            screen.blit(surface, (draw_x, draw_y))
         costume_frames = self.s4_costume_frames if self.costume_index else self.armor_frames
         costume_origin_x = self.s4_origin_x if self.costume_index else self.armor_origin_x
         costume_origin_y = self.s4_origin_y if self.costume_index else self.armor_origin_y
@@ -649,20 +702,25 @@ def clamp(value, low, high):
     return max(low, min(high, value))
 
 
-def original_run_power_steps(move_x, move_y, duration):
-    """Translate Player.runPower's per-frame parabola into SWF-tick steps."""
+def numeric_value(value, default=0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def original_run_power_steps(move_x, move_y, duration, parabola=0.3):
+    """Translate runPower's per-frame parabola into SWF-tick steps."""
     duration = int(duration or 0)
     move_x = float(move_x or 0)
     move_y = float(move_y or 0)
-    if duration <= 0:
-        return []
     if duration <= 3:
         return [(move_x, -move_y)]
     denominator = duration * duration - duration * (duration - 1) / 2
-    x_start = move_x * 0.3 / duration
-    y_start = move_y * 0.3 / duration
-    x_curve = move_x * 0.7 / denominator
-    y_curve = move_y * 0.7 / denominator
+    x_start = move_x * parabola / duration
+    y_start = move_y * parabola / duration
+    x_curve = move_x * (1 - parabola) / denominator
+    y_curve = move_y * (1 - parabola) / denominator
     return [
         (x_start + x_curve * remaining, -(y_start + y_curve * remaining))
         for remaining in range(duration, 0, -1)
@@ -689,6 +747,9 @@ class Player:
         self.attack_motion_index = 0
         self.attack_motion_clock = 0.0
         self.attack_motion_direction = 1
+        self.active_action = None
+        self.last_action_frame = 0
+        self.action_gravity = 2
         self.air_down_charge_timer = 0.0
         self.attack_timer = 0.0
         self.skill_cooldowns = {}
@@ -723,6 +784,24 @@ class Player:
             self.dash_key = None
             self.is_dashing = False
 
+    def _process_action_frames(self, first_frame, last_frame):
+        rows = SWORDSMAN_FRAME_DATA.get(self.active_action, {})
+        for frame in range(first_frame, last_frame + 1):
+            row = rows.get(frame)
+            if row is None:
+                continue
+            self.action_gravity = numeric_value(row.get("gravity", 2), 2)
+            motion = row.get("motion", {})
+            steps = original_run_power_steps(
+                motion.get("x", 0), motion.get("y", 0), motion.get("duration", 0)
+            )
+            if steps and (
+                numeric_value(motion.get("x", 0)) != 0
+                or numeric_value(motion.get("y", 0)) != 0
+            ):
+                self.attack_motion_steps.extend(steps)
+        self.last_action_frame = max(self.last_action_frame, last_frame)
+
     def update(self, dt, keys):
         direction = int(keys[pygame.K_d] or keys[pygame.K_RIGHT]) - int(
             keys[pygame.K_a] or keys[pygame.K_LEFT]
@@ -747,22 +826,11 @@ class Player:
         if self.air_down_charge_timer > 0:
             self.air_down_charge_timer = max(0, self.air_down_charge_timer - dt)
             self.vy = 0
-            if self.air_down_charge_timer == 0:
-                if self.last_attack_kind == "down":
-                    self.y = GROUND_Y - self.rect.height
-                    self.on_ground = True
-                    fall_dt = 0
-                elif self.last_attack_kind == "skill2":
-                    self.vy = 450
-                    fall_dt = dt
-                else:
-                    fall_dt = dt
-            else:
-                fall_dt = 0
+            fall_dt = dt if self.air_down_charge_timer == 0 else 0
         else:
             fall_dt = dt
         if fall_dt > 0:
-            self.vy += GRAVITY * fall_dt
+            self.vy += GRAVITY * (self.action_gravity / 2) * fall_dt
             self.y += self.vy * fall_dt
         self.attack_motion_clock += dt * ANIMATION_FPS
         while self.attack_motion_clock >= 1 and self.attack_motion_index < len(self.attack_motion_steps):
@@ -789,6 +857,15 @@ class Player:
             else:
                 self.visual.request("站")
             self.visual.update(dt)
+            if self.active_action:
+                if self.visual.one_shot and self.visual.action == self.active_action:
+                    action_start = self.visual.actions[self.active_action][0]
+                    relative_frame = self.visual.frame - action_start + 1
+                    if relative_frame > self.last_action_frame:
+                        self._process_action_frames(self.last_action_frame + 1, relative_frame)
+                elif not self.visual.one_shot:
+                    self.active_action = None
+                    self.action_gravity = 2
         self.attack_lock = max(0, self.attack_lock - dt)
         self.combo_window = max(0, self.combo_window - dt)
         if self.combo_window <= 0:
@@ -836,6 +913,10 @@ class Player:
 
             if self.skill_cooldowns.get(skill_type, 0) > 0:
                 return False
+            skill = SWORDSMAN_SKILLS.get(skill_type, {})
+            mana_cost = int(numeric_value(skill.get("mana_cost", 0)))
+            if self.mp < mana_cost:
+                return False
 
             action = {
                 "run": "跑攻",
@@ -848,11 +929,9 @@ class Player:
             self.attack_motion_index = 0
             self.attack_motion_clock = 0
             self.attack_motion_direction = self.facing
-            frame_data = SWORDSMAN_FRAME_DATA.get(action, {}).get(1, {})
-            motion = frame_data.get("motion", {})
-            self.attack_motion_steps = original_run_power_steps(
-                motion.get("x", 0), motion.get("y", 0), motion.get("duration", 0)
-            )
+            self.active_action = action
+            self.last_action_frame = 0
+            self.action_gravity = 2
             self.air_down_charge_timer = 0
 
             self.attack_timer = 0.19
@@ -863,7 +942,6 @@ class Player:
             self.attack_active = True
             self.attack_targets.clear()
             self.skill_hit_targets.clear()
-            skill = SWORDSMAN_SKILLS.get(skill_type, {})
             skill_cd_frames = int(skill.get("cooldown", 0) or 0)
             skill_cooldown = skill_cd_frames / ANIMATION_FPS
             lock_frames = ATTACK_LOCK_FRAMES.get(attack_kind, 8)
@@ -873,6 +951,8 @@ class Player:
                 action_duration = (action_end - action_start + 1) / self.visual.FPS
                 self.attack_lock = max(self.attack_lock, action_duration)
                 self.visual.play(action, loop=False, force=True)
+                if self.visual.one_shot and self.visual.action == action:
+                    self._process_action_frames(1, 1)
             if attack_kind == "down" and not self.on_ground:
                 slam_frames = [
                     frame for frame, row in SWORDSMAN_FRAME_DATA.get("下斩", {}).items()
@@ -884,19 +964,11 @@ class Player:
                 self.vy = 0
             if skill_cooldown > 0:
                 self.skill_cooldowns[skill_type] = skill_cooldown
+            self.mp -= mana_cost
             if attack_kind == "skill1":
-                # The source skill description grants invulnerability during
-                # the opening thrust; its first weapon hit window ends at frame 8.
                 self.invincible = max(self.invincible, 8 / ANIMATION_FPS)
             elif attack_kind == "skill2":
-                self.vy = -340
-                self.on_ground = False
-                self.air_down_charge_timer = 28 / ANIMATION_FPS
-            elif attack_kind == "skill3":
-                self.attack_motion_steps = [(12, 0)] * 16
-            elif attack_kind == "skill4":
-                self.invincible = max(self.invincible, 14 / ANIMATION_FPS)
-                self.attack_motion_steps = [(4, 0)] * 10
+                self.invincible = max(self.invincible, 40 / ANIMATION_FPS)
             if run_attack:
                 self.run_attack_timer = self.attack_lock
             if self.is_dashing:
@@ -921,6 +993,15 @@ class Player:
             return pygame.Rect(self.rect.right - 3, top, width, height)
         return pygame.Rect(self.rect.left - width + 3, top, width, height)
 
+    def hitbox(self):
+        width, height = PLAYER_HITBOX_SIZE
+        return pygame.Rect(
+            self.rect.centerx - width // 2,
+            self.rect.bottom - height,
+            width,
+            height,
+        )
+
     def take_hit(self, damage, source_x):
         if self.invincible > 0:
             return
@@ -929,9 +1010,10 @@ class Player:
             self.is_dashing = False
             self.last_direction_tap.clear()
         self.hp = max(0, self.hp - damage)
-        self.invincible = 0.65
         self.hurt_timer = 0.18
         self.attack_active = False
+        self.active_action = None
+        self.action_gravity = 2
         self.attack_lock = 0
         self.attack_motion_steps = []
         self.attack_motion_index = 0
@@ -951,18 +1033,64 @@ class Enemy:
         self.y = float(self.rect.y)
         self.vy = 0.0
         self.airborne = False
+        self.knockback_steps = []
+        self.knockback_index = 0
+        self.knockback_clock = 0.0
+        self.knockback_direction = 1
         self.hp = self.max_hp = 42 if kind == 0 else 95
         self.speed = 78 if kind == 0 else 54
         self.attack_cd = random.uniform(0.3, 0.9)
+        self.attack_frame = None
+        self.attack_elapsed_frames = 0.0
+        self.attack_did_hit = False
         self.hurt_timer = 0.0
         self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
         self.flash = 0.0
         self.facing = -1
 
+    def hitbox(self):
+        width, height = ENEMY_HITBOX_SIZE
+        return pygame.Rect(
+            self.rect.centerx - width // 2,
+            self.rect.bottom - height + 10,
+            width,
+            height,
+        )
+
+    def attack_hitbox(self):
+        if self.attack_frame != ENEMY_ATTACK_FRAMES[0]:
+            return None
+        left, top, width, height = ENEMY_ATTACK_HITBOX
+        if self.facing < 0:
+            left = -left - width
+        return pygame.Rect(
+            self.rect.centerx + left,
+            self.rect.bottom + top,
+            width,
+            height,
+        )
+
     def update(self, dt, player):
         self.attack_cd = max(0, self.attack_cd - dt)
         self.hurt_timer = max(0, self.hurt_timer - dt)
         self.flash = max(0, self.flash - dt)
+        if self.attack_frame is not None:
+            self.attack_elapsed_frames += dt * ANIMATION_FPS
+            if self.attack_elapsed_frames >= ENEMY_ATTACK_FRAMES[1] - ENEMY_ATTACK_FRAMES[0] + 1:
+                self.attack_frame = None
+            else:
+                self.attack_frame = ENEMY_ATTACK_FRAMES[0] + int(self.attack_elapsed_frames)
+        self.knockback_clock += dt * ANIMATION_FPS
+        while self.knockback_clock >= 1 and self.knockback_index < len(self.knockback_steps):
+            move_x, move_y = self.knockback_steps[self.knockback_index]
+            self.x += move_x * self.knockback_direction
+            self.y += move_y
+            self.knockback_index += 1
+            self.knockback_clock -= 1
+            if self.y + self.h < GROUND_Y:
+                self.airborne = True
+            elif not self.airborne:
+                self.y = float(GROUND_Y - self.h)
         if self.airborne:
             self.y += self.vy * dt
             self.vy += GRAVITY * dt
@@ -973,23 +1101,46 @@ class Enemy:
             self.rect.y = round(self.y)
         dx = player.rect.centerx - self.rect.centerx
         self.facing = 1 if dx > 0 else -1
-        if not self.airborne and abs(dx) > 46 and self.hurt_timer <= 0:
+        if (
+            self.attack_frame is None
+            and not self.airborne
+            and self.hurt_timer <= 0
+            and self.attack_cd <= 0
+            and abs(dx) <= 46
+            and abs(player.rect.bottom - self.rect.bottom) < 50
+        ):
+            self.attack_cd = 1.25 if self.kind == 0 else 1.55
+            self.attack_frame = ENEMY_ATTACK_FRAMES[0]
+            self.attack_elapsed_frames = 0.0
+            self.attack_did_hit = False
+        if self.attack_frame is None and not self.airborne and abs(dx) > 46 and self.hurt_timer <= 0:
             self.x += self.facing * self.speed * dt
         self.rect.x = round(self.x)
-        if not self.airborne and self.hurt_timer <= 0 and abs(dx) < 60 and abs(player.rect.bottom - self.rect.bottom) < 30 and self.attack_cd <= 0:
-            self.attack_cd = 1.25 if self.kind == 0 else 1.55
-            player.take_hit(8 if self.kind == 0 else 13, self.rect.centerx)
 
-    def take_hit(self, damage, source_x, launch_speed=0, stun_duration=0.12):
+    def take_hit(
+        self,
+        damage,
+        source_x,
+        launch_speed=0,
+        stun_duration=0.12,
+        knockback=15,
+        motion_duration=0,
+        attacker_facing=None,
+    ):
         self.hp -= damage
         self.flash = 0.12
+        self.attack_frame = None
+        self.attack_elapsed_frames = 0.0
         self.hurt_timer = max(self.hurt_timer, stun_duration)
-        self.x += 15 if self.rect.centerx > source_x else -15
-        self.rect.x = round(self.x)
-        if launch_speed < 0:
-            self.vy = min(self.vy, launch_speed)
-            self.airborne = True
-            self.hurt_timer = max(self.hurt_timer, 0.28)
+        if attacker_facing is None:
+            self.knockback_direction = 1 if self.rect.centerx > source_x else -1
+        else:
+            self.knockback_direction = attacker_facing
+        self.knockback_steps = original_run_power_steps(
+            knockback, launch_speed, motion_duration, parabola=0.2
+        )
+        self.knockback_index = 0
+        self.knockback_clock = 0.0
 
 
 class Bolt:
@@ -1014,6 +1165,7 @@ class Game:
         self.font = pygame.font.Font(None, 26)
         self.big_font = pygame.font.Font(None, 54)
         self.player_visual = OriginalCharacterVisual()
+        self.show_hitboxes = False
         self.reset()
 
     def reset(self):
@@ -1036,6 +1188,9 @@ class Game:
             self.enemies.append(Enemy(min(x, WORLD_WIDTH - 100), kind))
 
     def handle_key(self, key):
+        if key == pygame.K_F3:
+            self.show_hitboxes = not self.show_hitboxes
+            return
         p = self.player
         if self.game_over or self.victory:
             if key == pygame.K_r:
@@ -1075,10 +1230,11 @@ class Game:
         self.resolve_player_attack()
         for enemy in self.enemies:
             enemy.update(dt, p)
+        self.resolve_enemy_attacks()
         for bolt in self.bolts:
             bolt.update(dt)
             for enemy in self.enemies:
-                if bolt.life > 0 and bolt.rect.colliderect(enemy.rect):
+                if bolt.life > 0 and bolt.rect.colliderect(enemy.hitbox()):
                     enemy.take_hit(32 + (p.level - 1) * 4, p.rect.centerx)
                     bolt.life = 0
         self.bolts = [b for b in self.bolts if b.life > 0]
@@ -1104,20 +1260,62 @@ class Game:
                 self.wave_pause = 0
                 self.spawn_wave()
 
+    @staticmethod
+    def current_player_attack_boxes(p):
+        if p.visual and p.visual.available:
+            if not p.visual.one_shot:
+                return []
+            return p.visual.hitboxes_at(p.rect.centerx, p.rect.bottom, p.facing)
+        if p.attack_timer <= 0:
+            return []
+        return [p.attack_box(p.current_attack_run, p.last_attack_kind)]
+
+    def hitbox_debug_regions(self, camera):
+        p = self.player
+        offset = -round(camera)
+        regions = [("玩家受击", p.hitbox())]
+        if p.attack_active:
+            regions.extend(("玩家攻击", box) for box in self.current_player_attack_boxes(p))
+        for enemy in self.enemies:
+            regions.append(("敌人受击", enemy.hitbox()))
+            attack_box = enemy.attack_hitbox()
+            if attack_box is not None:
+                regions.append(("敌人攻击", attack_box))
+        return [
+            (label, box.move(offset, 0), HITBOX_DEBUG_COLORS[label])
+            for label, box in regions
+        ]
+
+    def draw_hitbox_debug(self, camera):
+        if not self.show_hitboxes:
+            return
+        for _label, box, color in self.hitbox_debug_regions(camera):
+            pygame.draw.rect(self.screen, color, box, 2)
+
+        x = 18
+        y = 103
+        entries = [
+            ("F3 HITBOX ON", WHITE),
+            ("P-HURT", HITBOX_DEBUG_COLORS["玩家受击"]),
+            ("E-HURT", HITBOX_DEBUG_COLORS["敌人受击"]),
+            ("P-ATK", HITBOX_DEBUG_COLORS["玩家攻击"]),
+            ("E-ATK", HITBOX_DEBUG_COLORS["敌人攻击"]),
+        ]
+        for label, color in entries:
+            self.screen.blit(self.font.render(label, True, color), (x, y))
+            x += self.font.size(label)[0] + 12
+
     def resolve_player_attack(self):
         p = self.player
         if not p.attack_active:
             return
-        if p.visual and p.visual.available:
-            if not p.visual.one_shot:
-                p.attack_active = False
-                return
-            boxes = p.visual.hitboxes_at(p.rect.centerx, p.rect.bottom, p.facing)
-        else:
-            if p.attack_timer <= 0:
-                p.attack_active = False
-                return
-            boxes = [p.attack_box(p.current_attack_run, p.last_attack_kind)]
+        if p.visual and p.visual.available and not p.visual.one_shot:
+            p.attack_active = False
+            return
+        if (not p.visual or not p.visual.available) and p.attack_timer <= 0:
+            p.attack_active = False
+            return
+        boxes = self.current_player_attack_boxes(p)
 
         if not boxes:
             return
@@ -1130,50 +1328,73 @@ class Game:
                 p.last_attack_kind, SKILL_ACTIONS.get(p.last_attack_kind, "攻击1")
             )
         skill = SWORDSMAN_SKILLS.get(skill_type, {})
-        multiplier = float(skill.get("values", {}).get("数值1", "0.8"))
-        damage = round((17 + (p.level - 1) * 3) * multiplier)
+        multiplier = numeric_value(skill.get("values", {}).get("数值1", "0.8"), 0.8)
         action_rows = SWORDSMAN_FRAME_DATA.get(action, {})
         relative_frame = 1
         if p.visual and action in p.visual.actions:
             action_start, _action_end = p.visual.actions[action]
             relative_frame = max(1, p.visual.frame - action_start + 1)
-        hit_group = None
-        if p.last_attack_kind in SKILL_HIT_WINDOWS:
-            hit_group = next(
-                (index for index, (start, end) in enumerate(SKILL_HIT_WINDOWS[p.last_attack_kind])
-                 if start <= relative_frame <= end),
-                None,
-            )
+        is_skill = p.last_attack_kind in SKILL_ACTIONS
+        hit_count = max(1, int(numeric_value(skill.get("values", {}).get("次数", 1), 1)))
+        hit_group = (
+            p.visual.hit_group_at(action, relative_frame, hit_count)
+            if is_skill and p.visual and p.visual.available
+            else None
+        )
         active_rows = [frame for frame in action_rows if frame <= relative_frame]
         frame_data = action_rows[max(active_rows)] if active_rows else action_rows.get(1, {})
+        frame_damage = frame_data.get("damage", {})
+        hit_power = numeric_value(frame_damage.get("hp", 1))
+        if hit_power <= 0:
+            return
+        damage = round((17 + (p.level - 1) * 3) * multiplier * hit_power)
+        skill_values = skill.get("values", {})
+        bonus_hardstun = int(numeric_value(skill_values.get("硬直", 0)))
+        bonus_knockback = int(numeric_value(skill_values.get("震退", 0)))
+        bonus_launch = int(numeric_value(skill_values.get("挑高", 0)))
+        bonus_duration = int(numeric_value(skill_values.get("持续", 0)))
         attacker_hardstun = int(
             frame_data.get("hardstun", FALLBACK_ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10))
-        )
+        ) + bonus_hardstun
         for enemy in self.enemies:
-            if p.last_attack_kind in SKILL_HIT_WINDOWS:
+            if p.last_attack_kind == "skill2" and not enemy.airborne:
+                continue
+            if is_skill and p.visual and p.visual.available:
                 hit_groups = p.skill_hit_targets.setdefault(enemy, set())
                 can_hit = hit_group is not None and hit_group not in hit_groups
             else:
                 can_hit = enemy not in p.attack_targets
-            if can_hit and any(box.colliderect(enemy.rect) for box in boxes):
-                if p.last_attack_kind == "up":
-                    launch_speed = UPPERCUT_LAUNCH_SPEED
-                elif p.last_attack_kind == "skill2":
-                    launch_speed = -300 if relative_frame >= 35 else 60
-                elif p.last_attack_kind == "skill4":
-                    launch_speed = -400
-                else:
-                    launch_speed = 0
+            if can_hit and any(box.colliderect(enemy.hitbox()) for box in boxes):
                 stun_frames = max(
                     0,
                     attacker_hardstun - enemy.stun_resistance_frames,
                 )
                 stun_duration = stun_frames / ANIMATION_FPS
-                enemy.take_hit(damage, p.rect.centerx, launch_speed, stun_duration)
-                if p.last_attack_kind in SKILL_HIT_WINDOWS:
+                enemy.take_hit(
+                    damage,
+                    p.rect.centerx,
+                    launch_speed=int(numeric_value(frame_damage.get("launch", 0))) + bonus_launch,
+                    stun_duration=stun_duration,
+                    knockback=int(numeric_value(frame_damage.get("knockback", 0))) + bonus_knockback,
+                    motion_duration=int(numeric_value(frame_damage.get("duration", 0))) + bonus_duration,
+                    attacker_facing=p.facing,
+                )
+                if is_skill and p.visual and p.visual.available:
                     hit_groups.add(hit_group)
                 else:
                     p.attack_targets.add(enemy)
+
+    def resolve_enemy_attacks(self):
+        player_hitbox = self.player.hitbox()
+        for enemy in self.enemies:
+            hitbox = enemy.attack_hitbox()
+            if (
+                hitbox is not None
+                and not enemy.attack_did_hit
+                and hitbox.colliderect(player_hitbox)
+            ):
+                enemy.attack_did_hit = True
+                self.player.take_hit(8 if enemy.kind == 0 else 13, enemy.rect.centerx)
 
     def draw_background(self, camera):
         self.screen.fill(SKY)
@@ -1242,6 +1463,7 @@ class Game:
             rect = bolt.rect.move(-round(camera), 0)
             pygame.draw.ellipse(self.screen, (255, 209, 105), rect.inflate(12, 8))
             pygame.draw.ellipse(self.screen, (255, 248, 205), rect)
+        self.draw_hitbox_debug(camera)
         self.draw_bar(22, 22, 190, p.hp, p.max_hp, (204, 65, 75), f"HP {p.hp}/{p.max_hp}")
         self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
         self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
@@ -1265,7 +1487,7 @@ class Game:
                 col = (105, 235, 135)
             self.screen.blit(self.font.render(txt, True, col), (hud_skill_x + i * 95, 52))
 
-        controls = "双击 A/D 冲刺   J 攻击   K 跳跃   H/U/I/O 技能1-4   L 换剑   C 换装"
+        controls = "双击 A/D 冲刺   J 攻击   K 跳跃   H/U/I/O 技能1-4   L 换剑   C 换装   F3 HITBOXES"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
         if self.game_over or self.victory:
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)

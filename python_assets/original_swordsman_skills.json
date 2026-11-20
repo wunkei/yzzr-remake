@@ -27,6 +27,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "0",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -53,6 +54,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力374%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "41",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -79,6 +81,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力401%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "47",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -105,6 +108,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力428%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "55",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -131,6 +135,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力455%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "72",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -157,6 +162,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力482%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "85",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -183,6 +189,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力509%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "110",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -209,6 +216,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力536%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "144",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -235,6 +243,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力563%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "179",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -261,6 +270,7 @@
       "description": "剑师感悟到风的流向后,可以御风旋转着切割敌人,共造成攻击力590%的多次伤害。",
       "frames": "4",
       "cooldown": "240",
+      "mana_cost": "214",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -287,6 +297,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力485%的单次伤害，附带硬直133点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "51",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -313,6 +324,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力523%的单次伤害，附带硬直137点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "62",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -339,6 +351,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力561%的单次伤害，附带硬直143点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "84",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -365,6 +378,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力599%的单次伤害，附带硬直149点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "103",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -391,6 +405,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力637%的单次伤害，附带硬直155点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "139",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -417,6 +432,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力675%的单次伤害，附带硬直161点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "171",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -443,6 +459,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力713%的单次伤害，附带硬直167点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "215",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -469,6 +486,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力751%的单次伤害，附带硬直173点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "259",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -495,6 +513,7 @@
       "description": "聚气成剑，对前方对角色造成角色攻击力789%的单次伤害，附带硬直179点。",
       "frames": "5",
       "cooldown": "360",
+      "mana_cost": "303",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -521,6 +540,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力161%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "30",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -547,6 +567,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力177%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "33",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -573,6 +594,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力193%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "37",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -599,6 +621,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力209%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "41",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -625,6 +648,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力225%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "51",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -651,6 +675,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力241%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "56",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -677,6 +702,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力257%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "62",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -703,6 +729,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力273%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "77",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -729,6 +756,7 @@
       "description": "短时间内抵御所有所受伤害，并对前方敌人造成攻击力289%的单次伤害。",
       "frames": "6",
       "cooldown": "168",
+      "mana_cost": "86",
       "duration": "1",
       "effect_type": "3",
       "values": {
@@ -755,6 +783,7 @@
       "description": "快速的挥动武器，共造成角色攻击力368%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "36",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -781,6 +810,7 @@
       "description": "快速的挥动武器，共造成角色攻击力400%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "40",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -807,6 +837,7 @@
       "description": "快速的挥动武器，共造成角色攻击力432%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "46",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -833,6 +864,7 @@
       "description": "快速的挥动武器，共造成角色攻击力464%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "52",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -859,6 +891,7 @@
       "description": "快速的挥动武器，共造成角色攻击力496%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "65",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -885,6 +918,7 @@
       "description": "快速的挥动武器，共造成角色攻击力528%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "74",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -911,6 +945,7 @@
       "description": "快速的挥动武器，共造成角色攻击力561%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "93",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -937,6 +972,7 @@
       "description": "快速的挥动武器，共造成角色攻击力593%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "106",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -963,6 +999,7 @@
       "description": "快速的挥动武器，共造成角色攻击力625%的多次伤害。",
       "frames": "7",
       "cooldown": "288",
+      "mana_cost": "137",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -989,6 +1026,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力227%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "44",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1015,6 +1053,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力242%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "52",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1041,6 +1080,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力258%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "60",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1067,6 +1107,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力273%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "79",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1093,6 +1134,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力288%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "93",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1119,6 +1161,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力304%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "122",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1145,6 +1188,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力319%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "161",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1171,6 +1215,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力335%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "202",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1197,6 +1242,7 @@
       "description": "对远方释放剑气并将远方敌人拖动至角色近前，共造成角色攻击力350%的多次伤害。",
       "frames": "8",
       "cooldown": "168",
+      "mana_cost": "243",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1223,6 +1269,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力579%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "57",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1249,6 +1296,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力621%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "70",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1275,6 +1323,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力663%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "95",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1301,6 +1350,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力706%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "117",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1327,6 +1377,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力748%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "159",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1353,6 +1404,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力790%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "196",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1379,6 +1431,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力832%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "248",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1405,6 +1458,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力875%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "300",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1431,6 +1485,7 @@
       "description": "王者怒气的最终释放，共造成角色攻击力917%的多次伤害。",
       "frames": "9",
       "cooldown": "504",
+      "mana_cost": "352",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1457,6 +1512,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "0",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1483,6 +1539,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "0",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1509,6 +1566,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "0",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1535,6 +1593,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "27",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1561,6 +1620,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "36",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1587,6 +1647,7 @@
       "description": "无",
       "frames": "1",
       "cooldown": "27",
+      "mana_cost": "0",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1613,6 +1674,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力156%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "28",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1639,6 +1701,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力172%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "31",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1665,6 +1728,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力188%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "35",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1691,6 +1755,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力204%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "38",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1717,6 +1782,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力220%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "47",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1743,6 +1809,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力236%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "52",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1769,6 +1836,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力252%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "58",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1795,6 +1863,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力268%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "72",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1821,6 +1890,7 @@
       "description": "向前穿刺并回到原地,对途经遇到的敌人造成攻击力284%的伤害,穿刺时无敌。",
       "frames": "2",
       "cooldown": "120",
+      "mana_cost": "80",
       "duration": "1",
       "effect_type": "2",
       "values": {
@@ -1847,6 +1917,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力365%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "34",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1873,6 +1944,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力398%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "37",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1899,6 +1971,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力431%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "42",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1925,6 +1998,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力464%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "48",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1951,6 +2025,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力497%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "60",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -1977,6 +2052,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力530%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "68",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -2003,6 +2079,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力563%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "86",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -2029,6 +2106,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力596%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "97",
       "duration": "1",
       "effect_type": "1",
       "values": {
@@ -2055,6 +2133,7 @@
       "description": "跃到空中对空中的敌人连续攻击,共造成攻击力629%的多次伤害。",
       "frames": "3",
       "cooldown": "192",
+      "mana_cost": "125",
       "duration": "1",
       "effect_type": "1",
       "values": {
