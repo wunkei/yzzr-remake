@@ -39,6 +39,15 @@ equivalent equipment/stat model, so it uses the extracted action coefficient
 against its placeholder base damage instead of adding damage for combo index or
 giving running attack a fabricated 1.5× bonus.
 
+Cooldowns are per skill ID, not a shared attack timer. The original maps the
+four basic attacks to `a1`–`a4` (zero cooldown), running attack to `a5` (27
+ticks), uppercut to `a6` (36 ticks), and down slash to `a7` (27 ticks). The
+action's `中断` / animation completion rules separately determine when another
+action can start. Thus after the uppercut animation finishes, a basic attack
+can start immediately while another uppercut remains unavailable until `a6`
+recovers. The Python port now tracks each selected skill's cooldown separately
+from its action-duration lock.
+
 The Python prototype now reads the original player frame records for attack
 root motion and the down-slash gravity change. It still uses an action-duration
 lock instead of applying every `中断` record, uses a placeholder enemy body

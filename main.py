@@ -566,7 +566,6 @@ class Player:
         self.hp = self.max_hp = 100
         self.mp = self.max_mp = 60
         self.on_ground = True
-        self.attack_cd = 0.0
         self.attack_lock = 0.0
         self.combo_window = 0.0
         self.attack_motion_steps = []
@@ -575,7 +574,7 @@ class Player:
         self.attack_motion_direction = 1
         self.air_down_charge_timer = 0.0
         self.attack_timer = 0.0
-        self.skill_cd = 0.0
+        self.skill_cooldowns = {}
         self.hurt_timer = 0.0
         self.invincible = 0.0
         self.score = 0
@@ -666,14 +665,16 @@ class Player:
             else:
                 self.visual.request("站")
             self.visual.update(dt)
-        self.attack_cd = max(0, self.attack_cd - dt)
         self.attack_lock = max(0, self.attack_lock - dt)
         self.combo_window = max(0, self.combo_window - dt)
         if self.combo_window <= 0:
             self.combo = 0
         self.attack_timer = max(0, self.attack_timer - dt)
         self.run_attack_timer = max(0, self.run_attack_timer - dt)
-        self.skill_cd = max(0, self.skill_cd - dt)
+        for skill_type in list(self.skill_cooldowns):
+            self.skill_cooldowns[skill_type] = max(0, self.skill_cooldowns[skill_type] - dt)
+            if self.skill_cooldowns[skill_type] == 0:
+                del self.skill_cooldowns[skill_type]
         self.invincible = max(0, self.invincible - dt)
 
     def jump(self):
@@ -686,7 +687,7 @@ class Player:
                 self.visual.play("跳", loop=True, force=True)
 
     def attack(self, held_keys=None):
-        if self.attack_cd <= 0 and self.attack_lock <= 0 and self.hurt_timer <= 0:
+        if self.attack_lock <= 0 and self.hurt_timer <= 0:
             run_attack = self.is_dashing and self.on_ground
             held_keys = held_keys or pygame.key.get_pressed()
             if run_attack:
@@ -706,6 +707,9 @@ class Player:
                 skill_type = ATTACK_SKILL_TYPES[f"normal{self.combo}"]
             else:
                 skill_type = ATTACK_SKILL_TYPES[attack_kind]
+
+            if self.skill_cooldowns.get(skill_type, 0) > 0:
+                return False
 
             action = {
                 "run": "跑攻",
@@ -737,7 +741,6 @@ class Player:
             skill_cooldown = skill_cd_frames / ANIMATION_FPS
             lock_frames = ATTACK_LOCK_FRAMES.get(attack_kind, 8)
             self.attack_lock = lock_frames / ANIMATION_FPS
-            minimum_cooldown = skill_cooldown
             if self.visual:
                 action_start, action_end = self.visual.actions.get(action, (0, 0))
                 action_duration = (action_end - action_start + 1) / self.visual.FPS
@@ -752,7 +755,8 @@ class Player:
                 fps = self.visual.FPS if self.visual else ANIMATION_FPS
                 self.air_down_charge_timer = charge_frames / fps
                 self.vy = 0
-            self.attack_cd = minimum_cooldown
+            if skill_cooldown > 0:
+                self.skill_cooldowns[skill_type] = skill_cooldown
             if run_attack:
                 self.run_attack_timer = self.attack_lock
             if self.is_dashing:
