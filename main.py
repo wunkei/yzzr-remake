@@ -605,10 +605,14 @@ class Player:
             self.facing = direction
         self.x += self.vx * dt
         if self.air_down_charge_timer > 0:
-            held = min(dt, self.air_down_charge_timer)
-            self.air_down_charge_timer -= held
+            self.air_down_charge_timer = max(0, self.air_down_charge_timer - dt)
             self.vy = 0
-            fall_dt = dt - held
+            if self.air_down_charge_timer == 0:
+                # Align the inferred landing with the original weapon's first
+                # active down-slash frame so its hitbox resolves at ground level.
+                self.y = GROUND_Y - self.rect.height
+                self.on_ground = True
+            fall_dt = 0
         else:
             fall_dt = dt
         if fall_dt > 0:

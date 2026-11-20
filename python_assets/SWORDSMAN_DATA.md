@@ -47,8 +47,10 @@ step even with no movement key held. Its 10-pixel distance is an exposed
 provisional value because the original `移动参数.X` value is in the missing
 player XML. For an airborne down slash, vertical motion pauses until the first
 extracted sword-hit frame (12 frames after the slash begins for sword 1681),
-then gravity resumes. This reproduces the observed charge/hold/release order;
-the original per-frame gravity numbers are still unavailable.
+then the prototype snaps to the ground before resolving that frame's hitbox.
+This matches the observed charge, slam, and ground-impact order. The precise
+original `重力调整` / `移动参数.Y` values are still unavailable, so the snap
+is an inferred landing rule rather than a recovered frame-data value.
 
 Other original data already extracted and used by the Python port:
 
