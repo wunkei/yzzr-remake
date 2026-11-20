@@ -6,14 +6,17 @@ from `DataX_v1920.swf`'s `InData_SkillData` embedded binary resource and contain
 the sword fighter's `a1`–`a7` actions: four basic combo steps, running attack,
 uppercut, and downward slash. This source has one record per action at level 1.
 
+The player animation-frame rules are extracted separately to
+`original_swordsman_player_frames.xml` and `.json`. Their source is
+`DataX_v1920.swf`'s decompiled `src.Data.PlayerXML_0()` function in
+`DataX_v1920/scripts/src/Data.as`—they are embedded in the DataX SWF, not
+loaded from a server. They provide each action's `硬直`, `重力调整`,
+`移动参数`, interruptibility and hit effect values.
+
 The table supplies skill multipliers, cooldowns, hit counts, damage limits, and
 skill-added hardstun/launch/knockback/duration. For these seven level-1 actions,
-the skill-added hardstun, launch, knockback, and duration are all zero. This is
-not the complete attack response: `Skin.as` adds these values to the active
-frame's `Skin.Xml` values. That per-frame player XML is not embedded in the
-available SWF exports (the `Skin.PlayerXml` array is populated externally), so
-the current game-side hitstun timing is still an approximation until that data
-is captured from the original runtime or server response.
+the skill-added values are zero; `Skin.as` combines them with the per-frame
+values above to get the actual result.
 
 ## Verified action behavior
 
@@ -36,21 +39,30 @@ equivalent equipment/stat model, so it uses the extracted action coefficient
 against its placeholder base damage instead of adding damage for combo index or
 giving running attack a fabricated 1.5× bonus.
 
-The Python prototype still cannot exactly mirror `Skin.GoTo`'s per-frame
-interruptibility (`中断`), motion (`移动参数`), target hitbox (`Enemy.hit`), or
-the player's final hitstun/launch/knockback values without the external
-`Skin.PlayerXml` data. Its current action-duration lock, enemy body rectangle,
-and outgoing hitstun/launch values are implementation approximations.
+The Python prototype now reads the original player frame records for attack
+root motion and the down-slash gravity change. It still uses an action-duration
+lock instead of applying every `中断` record, uses a placeholder enemy body
+rectangle instead of the original `Enemy.hit`, and does not yet apply the
+frame-data knockback and launch durations through the original `runPower`
+formula. Those enemy response details remain approximate.
 
-The port now also gives grounded normal attacks a small forward root-motion
-step even with no movement key held. Its 10-pixel distance is an exposed
-provisional value because the original `移动参数.X` value is in the missing
-player XML. For an airborne down slash, vertical motion pauses until the first
-extracted sword-hit frame (12 frames after the slash begins for sword 1681),
-then the prototype snaps to the ground before resolving that frame's hitbox.
-This matches the observed charge, slam, and ground-impact order. The precise
-original `重力调整` / `移动参数.Y` values are still unavailable, so the snap
-is an inferred landing rule rather than a recovered frame-data value.
+The original player table shows Attack 1 has no horizontal movement, Attacks 2
+and 3 each move forward 25 pixels over 4 SWF ticks, Attack 4 has no movement,
+and running attack moves forward 150 pixels over 6 ticks. The Python port now
+uses those values and the original `runPower` easing formula. For an airborne
+down slash, the table sets gravity to 0 on action frame 1, then to 100 on frame
+13. Frame 13 is also the first sword-hit frame (SWF frame 114 for sprite 1681),
+so the port holds the player during charge and places the impact at ground
+level on that frame.
+
+The same frame table gives attacker hardstun values of 120, 122, 123, 120 for
+Attacks 1–4, 126 for running attack, 123 for uppercut, and 122 for down slash.
+The prototype now reads those values. It subtracts a 100-tick baseline for its
+placeholder enemy; actual enemies use their own `EnemySkin` resistance. The
+player frame table also specifies uppercut knockback 70 / launch 260 over 11
+ticks and down-slash knockback 180 / launch 30 over 6 ticks. The current enemy
+response still uses simplified fixed movement, so those launch/knockback curves
+are extracted but not yet reproduced exactly.
 
 Other original data already extracted and used by the Python port:
 
@@ -65,4 +77,10 @@ from `DataX_v1920.swf` with FFDec, run:
 
 ```powershell
 python tools/extract_swordsman_data.py --source path\to\InData_SkillData.bin
+```
+
+To regenerate the player-frame subset from the FFDec script export, run:
+
+```powershell
+python tools/extract_swordsman_frame_data.py --source path\to\Data.as
 ```

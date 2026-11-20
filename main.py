@@ -16,17 +16,13 @@ WORLD_WIDTH = 2600
 GROUND_Y = 448
 GRAVITY = 1850
 DOUBLE_TAP_WINDOW = 0.30
-# Per-frame Skin.Xml contains additional hardstun/launch values. It is supplied
-# by the original game at runtime and is not present in the exported SWFs.
-# Keep this explicit approximation isolated until that runtime data is captured.
+# X0 PlayerXML gives the uppercut a 260-pixel launch over 11 SWF ticks. The
+# placeholder enemy model still converts that displacement to a simple velocity.
 UPPERCUT_LAUNCH_SPEED = -480
-ATTACK_HITSTUN_FRAMES = {
-    "normal": 10,
-    "run": 14,
-    "up": 24,
-    "down": 18,
-    "air": 12,
-}
+# Placeholder enemies use the common 100-tick EnemySkin resistance as a base;
+# actual monsters can differ and need their own EnemySkin data.
+DEFAULT_ENEMY_HURTSTUN_FRAMES = 100
+FALLBACK_ATTACK_HITSTUN_FRAMES = {"normal": 10, "run": 14, "up": 24, "down": 18, "air": 12}
 SWORDSMAN_SKILL_FILE = Path(__file__).resolve().parent / "python_assets" / "original_swordsman_skills.json"
 try:
     with SWORDSMAN_SKILL_FILE.open("r", encoding="utf-8") as skill_file:
@@ -34,6 +30,16 @@ try:
     SWORDSMAN_SKILLS = {row["skill_type"]: row for row in _skill_rows}
 except (OSError, ValueError, KeyError, TypeError):
     SWORDSMAN_SKILLS = {}
+
+SWORDSMAN_FRAME_FILE = Path(__file__).resolve().parent / "python_assets" / "original_swordsman_player_frames.json"
+try:
+    with SWORDSMAN_FRAME_FILE.open("r", encoding="utf-8") as frame_file:
+        _frame_rows = json.load(frame_file).get("records", [])
+    SWORDSMAN_FRAME_DATA = {}
+    for _row in _frame_rows:
+        SWORDSMAN_FRAME_DATA.setdefault(_row["action"], {})[_row["frame"]] = _row
+except (OSError, ValueError, KeyError, TypeError):
+    SWORDSMAN_FRAME_DATA = {}
 
 ATTACK_SKILL_TYPES = {
     "normal1": "a1",
@@ -47,13 +53,6 @@ ATTACK_SKILL_TYPES = {
 }
 ATTACK_LOCK_FRAMES = {"normal": 8, "air": 8, "run": 11, "up": 12, "down": 23}
 COMBO_INPUT_WINDOW_FRAMES = 15
-# Skin.Xml's exact per-frame root motion is supplied outside the exported SWFs.
-# This small grounded combo lunge is an isolated provisional value, not a
-# recovered original coordinate; the duration is tied to the first hit frame.
-NORMAL_ATTACK_LUNGE_PX = 10
-NORMAL_ATTACK_LUNGE_FRAMES = 3
-DOWNSLASH_FIRST_HIT_OFFSET_FRAMES = 12
-
 SKY = (20, 30, 57)
 WHITE = (241, 245, 255)
 ROOT = Path(__file__).resolve().parent
@@ -533,6 +532,26 @@ def clamp(value, low, high):
     return max(low, min(high, value))
 
 
+def original_run_power_steps(move_x, move_y, duration):
+    """Translate Player.runPower's per-frame parabola into SWF-tick steps."""
+    duration = int(duration or 0)
+    move_x = float(move_x or 0)
+    move_y = float(move_y or 0)
+    if duration <= 0:
+        return []
+    if duration <= 3:
+        return [(move_x, -move_y)]
+    denominator = duration * duration - duration * (duration - 1) / 2
+    x_start = move_x * 0.3 / duration
+    y_start = move_y * 0.3 / duration
+    x_curve = move_x * 0.7 / denominator
+    y_curve = move_y * 0.7 / denominator
+    return [
+        (x_start + x_curve * remaining, -(y_start + y_curve * remaining))
+        for remaining in range(duration, 0, -1)
+    ]
+
+
 class Player:
     LEFT_KEYS = (pygame.K_a, pygame.K_LEFT)
     RIGHT_KEYS = (pygame.K_d, pygame.K_RIGHT)
@@ -550,9 +569,10 @@ class Player:
         self.attack_cd = 0.0
         self.attack_lock = 0.0
         self.combo_window = 0.0
-        self.attack_lunge_remaining = 0.0
-        self.attack_lunge_total = 0.0
-        self.attack_lunge_direction = 1
+        self.attack_motion_steps = []
+        self.attack_motion_index = 0
+        self.attack_motion_clock = 0.0
+        self.attack_motion_direction = 1
         self.air_down_charge_timer = 0.0
         self.attack_timer = 0.0
         self.skill_cd = 0.0
@@ -594,14 +614,17 @@ class Player:
         self.is_dashing = bool(dash_held and direction)
         sprinting = self.is_dashing or keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
         speed = 382.5 if self.is_dashing else (340 if sprinting else 255)
+        attack_controls_locked = self.hurt_timer > 0 or bool(
+            self.visual and self.visual.one_shot and self.last_attack_kind != "air"
+        )
         if self.hurt_timer > 0:
             self.hurt_timer = max(0, self.hurt_timer - dt)
             self.vx *= max(0, 1 - 4 * dt)
-        elif self.run_attack_timer > 0:
-            self.vx = self.facing * 382.5
+        elif attack_controls_locked:
+            self.vx = 0
         else:
             self.vx = direction * speed
-        if direction:
+        if direction and not attack_controls_locked:
             self.facing = direction
         self.x += self.vx * dt
         if self.air_down_charge_timer > 0:
@@ -618,12 +641,13 @@ class Player:
         if fall_dt > 0:
             self.vy += GRAVITY * fall_dt
             self.y += self.vy * fall_dt
-        if self.attack_lunge_remaining > 0:
-            lunge_dt = min(dt, self.attack_lunge_remaining)
-            lunge_step = self.attack_lunge_total * lunge_dt / self.attack_lunge_remaining
-            self.x += lunge_step * self.attack_lunge_direction
-            self.attack_lunge_total -= lunge_step
-            self.attack_lunge_remaining -= lunge_dt
+        self.attack_motion_clock += dt * ANIMATION_FPS
+        while self.attack_motion_clock >= 1 and self.attack_motion_index < len(self.attack_motion_steps):
+            move_x, move_y = self.attack_motion_steps[self.attack_motion_index]
+            self.x += move_x * self.attack_motion_direction
+            self.y += move_y
+            self.attack_motion_index += 1
+            self.attack_motion_clock -= 1
         self.x = clamp(self.x, 12, WORLD_WIDTH - self.rect.width - 12)
         if self.y + self.rect.height >= GROUND_Y:
             self.y = GROUND_Y - self.rect.height
@@ -680,16 +704,26 @@ class Player:
                 self.combo = self.combo % 4 + 1
                 self.combo_window = COMBO_INPUT_WINDOW_FRAMES / ANIMATION_FPS
                 skill_type = ATTACK_SKILL_TYPES[f"normal{self.combo}"]
-                self.attack_lunge_total = NORMAL_ATTACK_LUNGE_PX
-                self.attack_lunge_direction = self.facing
             else:
                 skill_type = ATTACK_SKILL_TYPES[attack_kind]
-                self.attack_lunge_total = 0
 
-            self.attack_lunge_remaining = 0
+            action = {
+                "run": "跑攻",
+                "up": "上挑",
+                "down": "下斩",
+                "air": "攻击1",
+            }.get(attack_kind, f"攻击{self.combo}")
+
+            self.attack_motion_steps = []
+            self.attack_motion_index = 0
+            self.attack_motion_clock = 0
+            self.attack_motion_direction = self.facing
+            frame_data = SWORDSMAN_FRAME_DATA.get(action, {}).get(1, {})
+            motion = frame_data.get("motion", {})
+            self.attack_motion_steps = original_run_power_steps(
+                motion.get("x", 0), motion.get("y", 0), motion.get("duration", 0)
+            )
             self.air_down_charge_timer = 0
-            if attack_kind == "normal":
-                self.attack_lunge_remaining = NORMAL_ATTACK_LUNGE_FRAMES / ANIMATION_FPS
 
             self.attack_timer = 0.19
             if run_attack:
@@ -698,12 +732,6 @@ class Player:
             self.current_attack_run = run_attack
             self.attack_active = True
             self.attack_targets.clear()
-            action = {
-                "run": "跑攻",
-                "up": "上挑",
-                "down": "下斩",
-                "air": "攻击1",
-            }.get(attack_kind, f"攻击{self.combo}")
             skill = SWORDSMAN_SKILLS.get(skill_type, {})
             skill_cd_frames = int(skill.get("cooldown", 0) or 0)
             skill_cooldown = skill_cd_frames / ANIMATION_FPS
@@ -714,20 +742,13 @@ class Player:
                 action_start, action_end = self.visual.actions.get(action, (0, 0))
                 action_duration = (action_end - action_start + 1) / self.visual.FPS
                 self.attack_lock = max(self.attack_lock, action_duration)
-                if attack_kind == "normal":
-                    first_hit = self.visual.first_hit_frame(action)
-                    if first_hit is not None:
-                        lunge_frames = max(1, first_hit - action_start)
-                        self.attack_lunge_remaining = lunge_frames / self.visual.FPS
                 self.visual.play(action, loop=False, force=True)
             if attack_kind == "down" and not self.on_ground:
-                first_hit = self.visual.first_hit_frame(action) if self.visual else None
-                action_start = self.visual.actions[action][0] if self.visual and action in self.visual.actions else 0
-                charge_frames = (
-                    max(0, first_hit - action_start)
-                    if first_hit is not None
-                    else DOWNSLASH_FIRST_HIT_OFFSET_FRAMES
-                )
+                slam_frames = [
+                    frame for frame, row in SWORDSMAN_FRAME_DATA.get("下斩", {}).items()
+                    if frame > 1 and row.get("gravity", 0) > 0
+                ]
+                charge_frames = min(slam_frames) - 1 if slam_frames else 12
                 fps = self.visual.FPS if self.visual else ANIMATION_FPS
                 self.air_down_charge_timer = charge_frames / fps
                 self.vy = 0
@@ -768,7 +789,8 @@ class Player:
         self.hurt_timer = 0.18
         self.attack_active = False
         self.attack_lock = 0
-        self.attack_lunge_remaining = 0
+        self.attack_motion_steps = []
+        self.attack_motion_index = 0
         self.air_down_charge_timer = 0
         self.vx = -260 if source_x > self.rect.centerx else 260
         self.vy = -190
@@ -789,9 +811,7 @@ class Enemy:
         self.speed = 78 if kind == 0 else 54
         self.attack_cd = random.uniform(0.3, 0.9)
         self.hurt_timer = 0.0
-        # Mirrors the original EnemySkin 被攻击硬直 value (in SWF frames).
-        # Exported placeholder enemies have no per-monster data yet.
-        self.stun_resistance_frames = 0
+        self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
         self.flash = 0.0
         self.facing = -1
 
@@ -947,18 +967,31 @@ class Game:
             return
         if p.last_attack_kind == "normal":
             skill_type = ATTACK_SKILL_TYPES[f"normal{p.combo}"]
+            action = f"攻击{p.combo}"
         else:
             skill_type = ATTACK_SKILL_TYPES.get(p.last_attack_kind, "a1")
+            action = {"run": "跑攻", "up": "上挑", "down": "下斩", "air": "攻击1"}.get(
+                p.last_attack_kind, "攻击1"
+            )
         skill = SWORDSMAN_SKILLS.get(skill_type, {})
         multiplier = float(skill.get("values", {}).get("数值1", "0.8"))
         damage = round((17 + (p.level - 1) * 3) * multiplier)
+        action_rows = SWORDSMAN_FRAME_DATA.get(action, {})
+        relative_frame = 1
+        if p.visual and action in p.visual.actions:
+            action_start, _action_end = p.visual.actions[action]
+            relative_frame = max(1, p.visual.frame - action_start + 1)
+        active_rows = [frame for frame in action_rows if frame <= relative_frame]
+        frame_data = action_rows[max(active_rows)] if active_rows else action_rows.get(1, {})
+        attacker_hardstun = int(
+            frame_data.get("hardstun", FALLBACK_ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10))
+        )
         for enemy in self.enemies:
             if enemy not in p.attack_targets and any(box.colliderect(enemy.rect) for box in boxes):
                 launch_speed = UPPERCUT_LAUNCH_SPEED if p.last_attack_kind == "up" else 0
                 stun_frames = max(
                     0,
-                    ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10)
-                    - enemy.stun_resistance_frames,
+                    attacker_hardstun - enemy.stun_resistance_frames,
                 )
                 stun_duration = stun_frames / ANIMATION_FPS
                 enemy.take_hit(damage, p.rect.centerx, launch_speed, stun_duration)

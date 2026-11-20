@@ -1,0 +1,711 @@
+{
+  "source": "DataX_v1920.swf / src.Data.PlayerXML_0",
+  "skin_id": 0,
+  "frame_rate": 30,
+  "records": [
+    {
+      "action": "站",
+      "frame": 1,
+      "interval": 0,
+      "loop": true,
+      "interruptible": true,
+      "move_enabled": true,
+      "hardstun": 100,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "走",
+      "frame": 1,
+      "interval": 0,
+      "loop": true,
+      "interruptible": true,
+      "move_enabled": true,
+      "hardstun": 100,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "跑",
+      "frame": 1,
+      "interval": 0,
+      "loop": true,
+      "interruptible": true,
+      "move_enabled": true,
+      "hardstun": 100,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "跳",
+      "frame": 1,
+      "interval": 0,
+      "loop": true,
+      "interruptible": true,
+      "move_enabled": true,
+      "hardstun": 100,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "跑攻",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": true,
+      "hardstun": 126,
+      "gravity": 2,
+      "motion": {
+        "x": 150,
+        "y": 0,
+        "duration": 6
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 120,
+        "launch": 0,
+        "duration": 6
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "上挑",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "上挑",
+      "frame": 6,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 70,
+        "launch": 260,
+        "duration": 11
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "下斩",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 122,
+      "gravity": 0,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "下斩",
+      "frame": 13,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 122,
+      "gravity": 100,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 180,
+        "launch": 30,
+        "duration": 6
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "攻击1",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 120,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 4
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 30,
+        "launch": 0,
+        "duration": 5
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "攻击2",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 122,
+      "gravity": 2,
+      "motion": {
+        "x": 25,
+        "y": 0,
+        "duration": 4
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 30,
+        "launch": 0,
+        "duration": 5
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "攻击3",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 25,
+        "y": 0,
+        "duration": 4
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 30,
+        "launch": 0,
+        "duration": 5
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "攻击4",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 120,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 120,
+        "launch": 0,
+        "duration": 8
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能1",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 122,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 30,
+        "launch": 0,
+        "duration": 4
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能1",
+      "frame": 14,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 129,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": -160,
+        "launch": 0,
+        "duration": 7
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能2",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能2",
+      "frame": 6,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 0,
+      "motion": {
+        "x": 0,
+        "y": 160,
+        "duration": 1
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 0,
+        "launch": 8,
+        "duration": 2
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能2",
+      "frame": 35,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 125,
+      "gravity": 0,
+      "motion": {
+        "x": 30,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 70,
+        "launch": -300,
+        "duration": 4
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能2",
+      "frame": 40,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 110,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "技能3",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 10,
+        "launch": 120,
+        "duration": 5
+      },
+      "hurtstun": 112
+    },
+    {
+      "action": "技能3",
+      "frame": 15,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 30,
+        "launch": 20,
+        "duration": 3
+      },
+      "hurtstun": 114
+    },
+    {
+      "action": "技能3",
+      "frame": 24,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 123,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 250,
+        "launch": 40,
+        "duration": 5
+      },
+      "hurtstun": 114
+    },
+    {
+      "action": "技能4",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 0,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 30,
+        "launch": -500,
+        "duration": 2
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "转职技能1",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 125,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 170
+    },
+    {
+      "action": "转职技能1",
+      "frame": 12,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 145,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 300,
+        "launch": 35,
+        "duration": 6
+      },
+      "hurtstun": 120
+    },
+    {
+      "action": "转职技能2",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 127,
+      "gravity": 1,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": -4,
+        "launch": 7,
+        "duration": 2
+      },
+      "hurtstun": 112
+    },
+    {
+      "action": "转职技能2",
+      "frame": 29,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 127,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 300,
+        "launch": 35,
+        "duration": 6
+      },
+      "hurtstun": 112
+    },
+    {
+      "action": "转职技能3",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 130,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": -75,
+        "launch": 60,
+        "duration": 3
+      },
+      "hurtstun": 114
+    },
+    {
+      "action": "转职技能4",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 140,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 0,
+        "launch": 20,
+        "duration": 2
+      },
+      "hurtstun": 116
+    },
+    {
+      "action": "转职技能4",
+      "frame": 38,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 125,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 300,
+        "launch": 35,
+        "duration": 6
+      },
+      "hurtstun": 116
+    },
+    {
+      "action": "怪物技能",
+      "frame": 1,
+      "interval": 0,
+      "loop": false,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 125,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 1,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 6
+      },
+      "hurtstun": 100
+    },
+    {
+      "action": "被打",
+      "frame": 1,
+      "interval": 0,
+      "loop": true,
+      "interruptible": false,
+      "move_enabled": false,
+      "hardstun": 0,
+      "gravity": 2,
+      "motion": {
+        "x": 0,
+        "y": 0,
+        "duration": 0
+      },
+      "damage": {
+        "hp": 0,
+        "knockback": 0,
+        "launch": 0,
+        "duration": 0
+      },
+      "hurtstun": 100
+    }
+  ]
+}
