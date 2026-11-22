@@ -109,11 +109,11 @@ def _outlined_text(
 class StartScreen:
     """Fixed 940×580 original-style scene, independent of main.py."""
 
-    # Native Flash timeline placement: (button_id, (x, y))
+    # Native Flash timeline placement with Shape Bounds offsets accounted for:
     MENU_BUTTONS = (
-        ("new_game", 7195, (774, 76)),
+        ("new_game", 7195, (748, 35)),
         ("load_game", 7227, (749, 129)),
-        ("instructions", 7257, (771, 238)),
+        ("instructions", 7257, (749, 218)),
         ("updates", 7261, (749, 300)),
         ("forum", 7265, (727, 363)),
     )
