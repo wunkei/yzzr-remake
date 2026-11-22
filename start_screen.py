@@ -30,6 +30,7 @@ SYSTEM_CJK_FONTS = (
     Path("C:/Windows/Fonts/msyh.ttc"),
     Path("C:/Windows/Fonts/simhei.ttf"),
 )
+HISTORY_UPDATES_URL = "http://my.4399.com/forums/thread-33880763"
 NEW_SAVE_TITLE = SPRITE_DIR / (
     "DefineSprite_7389__main_cs5_233333_fla.新建存档标题_37"
 ) / "1.png"
@@ -113,7 +114,7 @@ class StartScreen:
         ("new_game", 7195, (748, 48)),
         ("load_game", 7227, (749, 146)),
         ("instructions", 7257, (749, 244)),
-        ("about", "about", (749, 342)),
+        ("updates", 7261, (749, 342)),
     )
     MODE_BUTTONS = (
         ("single", 7351, (752, 119)),
@@ -121,7 +122,6 @@ class StartScreen:
         ("mode_back", 7359, (752, 302)),
     )
     PANEL_RECTS = {
-        "about_panel": pygame.Rect(76, 0, 702, 494),
         7361: pygame.Rect(76, 0, 702, 494),
         7267: pygame.Rect(126, 24, 688, 514),
         7380: pygame.Rect(123, 22, 694, 526),
@@ -132,17 +132,16 @@ class StartScreen:
         image_dir: Path | None = None,
         *,
         save_entries: Sequence[str] | None = None,
-        panel: str | None = None,
     ) -> None:
         pygame.font.init()
         self.image_dir = image_dir or IMAGE_DIR
         self.canvas = pygame.Surface(STAGE_SIZE, pygame.SRCALPHA, 32)
         self.images: dict[int | str, pygame.Surface] = {}
-        self._button_states: dict[int | str, tuple[pygame.Surface, pygame.Surface, pygame.Rect]] = {}
+        self._button_states: dict[int, tuple[pygame.Surface, pygame.Surface, pygame.Rect]] = {}
         self._current_sprite_frames: dict[int, tuple[int, pygame.Surface]] = {}
         self.fonts = {size: _font(size) for size in (11, 12, 13, 14)}
         self.menu_mode = "main"
-        self.panel: str | None = panel
+        self.panel: str | None = "updates"
         self.player_mode: str | None = None
         self.selected_save_slot: int | None = None
         self.save_entries = self._normalize_save_entries(save_entries)
@@ -188,7 +187,7 @@ class StartScreen:
         return self.images[asset_id]
 
     def _button_state_set(
-        self, button_id: int | str,
+        self, button_id: int,
     ) -> tuple[pygame.Surface, pygame.Surface, pygame.Rect]:
         if button_id not in self._button_states:
             def load(state: str) -> pygame.Surface:
@@ -239,7 +238,7 @@ class StartScreen:
     def _draw_button(
         self,
         name: str,
-        button_id: int | str,
+        button_id: int,
         rect: pygame.Rect | tuple[int, int] | tuple[int, int, int, int],
     ) -> pygame.Rect:
         up, over, local_hitbox = self._button_state_set(button_id)
@@ -292,6 +291,7 @@ class StartScreen:
             self._hover_amount[name] = 0.0 if amount < 0.005 else amount
 
     def _draw_base(self) -> None:
+        self.hitboxes.pop("history_updates", None)
         self.canvas.fill((0, 0, 0, 255))
         self._draw_image(7089, (0, 0, *STAGE_SIZE))
         for sprite_id in BACKGROUND_ANIMATIONS:
@@ -323,34 +323,30 @@ class StartScreen:
     def _draw_menu(self) -> None:
         self.hitboxes = {
             name: rect for name, rect in self.hitboxes.items()
-            if name in ("age", "version")
+            if name in ("age", "version", "history_updates")
         }
         buttons = self.MODE_BUTTONS if self.menu_mode == "mode" else self.MENU_BUTTONS
         for name, asset_id, pos in buttons:
             self._draw_button(name, asset_id, pos)
 
-    def _draw_panel_frame(self, asset_id: int | str) -> None:
+    def _draw_panel_frame(self, asset_id: int) -> None:
         self._draw_image(asset_id, self.PANEL_RECTS[asset_id])
 
-    def _draw_about(self) -> None:
-        self._draw_panel_frame("about_panel")
+    def _draw_updates(self) -> None:
+        self._draw_panel_frame(7361)
+        self._draw_button("history_updates", 7374, (130, 378))
         white, yellow = (242, 239, 233), (255, 193, 0)
-        _crisp_text(self.canvas, "《勇者之刃 信仰篇》正式版 v19.20", self.fonts[14], (171, 108), yellow, shadow=(35, 20, 10))
+        _crisp_text(self.canvas, "勇者之刃【v19.20】版本更新内容：", self.fonts[13], (171, 120), yellow, shadow=(35, 20, 10))
         lines = (
-            ("【游戏简介】", yellow, 138),
-            ("经典横版卷轴动作格斗巨作，融合自由转职技能连击、装备打造与灵宠魔神觉醒。", white, 158),
-            ("支持键盘 1P 单人历险与 1P / 2P 本地双人协同作战。", white, 178),
-            ("【玩法特色】", yellow, 210),
-            ("· 武器切换：战斗中实时切换多种武器与专属奥义技能。", white, 230),
-            ("· 魔神降临：灵宠觉醒，与角色人宠合体变身，横扫炼狱深渊。", white, 250),
-            ("· 本地双人：双角色配合浮空连段、破防压制，协同击败强敌！", white, 270),
-            ("【复刻说明与致敬】", yellow, 302),
-            ("· 原作：厦门热网科技有限公司 & 四三九九网络股份有限公司 (4399.com)", white, 322),
-            ("· 本版本为原版高保真高清复刻，致敬童年经典回忆。", white, 342),
+            ("1.新增【魔神系统】：宠物觉醒，与主人合体变身魔神，当前开放【冥王龙觉醒】", 144),
+            ("  觉醒道具可在三个炼狱中击败boss有小几率获得", 160),
+            (" 勇者之刃信仰篇近期版本 更新内容:", 198),
+            ("  1.新增【狂牛战士】新宠特惠活动", 216),
+            ("  2.提升了宠物狂牛战士的技能释放频率", 232),
         )
-        for text, color, y in lines:
-            _crisp_text(self.canvas, text, self.fonts[12], (171, y), color, shadow=(35, 20, 10))
-        _crisp_text(self.canvas, "致敬经典 · 信仰不灭", self.fonts[12], (560, 396), yellow, shadow=(35, 20, 10))
+        for line, y in lines:
+            _crisp_text(self.canvas, line, self.fonts[13], (171, y), white, shadow=(35, 20, 10))
+        _crisp_text(self.canvas, "勇者之刃团队 2025.1.24", self.fonts[12], (557, 432), yellow, shadow=(35, 20, 10))
         self._draw_button("panel_back", 7299, (345, 430))
 
     def _draw_instructions(self) -> None:
@@ -417,8 +413,8 @@ class StartScreen:
     def draw(self) -> pygame.Surface:
         self._draw_base()
         self._draw_menu()
-        if self.panel == "about":
-            self._draw_about()
+        if self.panel == "updates":
+            self._draw_updates()
         elif self.panel == "instructions":
             self._draw_instructions()
         elif self.panel == "age":
@@ -436,12 +432,15 @@ class StartScreen:
 
     def click(self, position: tuple[int, int]) -> str | None:
         """Handle a click in 940×580 scene coordinates and return its action."""
+        if (self.panel == "updates" and self.hitboxes.get("history_updates", pygame.Rect(0, 0, 0, 0)).collidepoint(position)):
+            webbrowser.open(HISTORY_UPDATES_URL)
+            return "history_updates"
         if self.hitboxes.get("age", pygame.Rect(0, 0, 0, 0)).collidepoint(position):
-            self.panel = "age" if self.panel != "age" else None
+            self.panel = "age" if self.panel != "age" else "updates"
             return "age_notice"
-        if self.panel in ("about", "instructions", "age"):
+        if self.panel in ("updates", "instructions", "age"):
             if self.hitboxes.get("panel_back", pygame.Rect(0, 0, 0, 0)).collidepoint(position):
-                self.panel = None
+                self.panel = "updates" if self.panel == "age" else None
                 return "close_panel"
         elif self.panel in ("load", "new_save"):
             if self.hitboxes.get("save_close", pygame.Rect(0, 0, 0, 0)).collidepoint(position):
@@ -463,8 +462,8 @@ class StartScreen:
                 self.panel = "load"
             elif name == "instructions":
                 self.panel = None if self.panel == "instructions" else "instructions"
-            elif name == "about":
-                self.panel = None if self.panel == "about" else "about"
+            elif name == "updates":
+                self.panel = None if self.panel == "updates" else "updates"
             elif name == "mode_back":
                 self.menu_mode = "main"
             elif name in ("single", "double"):
@@ -484,10 +483,10 @@ def _stage_position(point: tuple[int, int], window_size: tuple[int, int]) -> tup
     return None
 
 
-def run_preview(path: Path, panel: str | None = None) -> None:
+def run_preview(path: Path) -> None:
     pygame.init()
     pygame.display.set_mode((1, 1), pygame.HIDDEN)
-    scene = StartScreen(panel=panel)
+    scene = StartScreen()
     pygame.image.save(scene.draw(), str(path))
     pygame.quit()
 
@@ -555,11 +554,10 @@ def run_window() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preview", type=Path, help="render the scene to a PNG and exit")
-    parser.add_argument("--panel", type=str, default=None, help="initial panel to show (e.g. about, instructions, age, load)")
+    parser.add_argument("--preview", type=Path, help="render the initial scene to a PNG and exit")
     args = parser.parse_args()
     if args.preview:
-        run_preview(args.preview, panel=args.panel)
+        run_preview(args.preview)
     else:
         run_window()
     return 0
