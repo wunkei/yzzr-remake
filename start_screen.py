@@ -8,6 +8,7 @@ frames come from the repository's extracted original SWF resources.
 from __future__ import annotations
 
 import argparse
+import sys
 import webbrowser
 from pathlib import Path
 from typing import Sequence
@@ -35,6 +36,23 @@ NEW_SAVE_TITLE = SPRITE_DIR / (
 ) / "1.png"
 
 
+def _enable_windows_dpi_awareness() -> None:
+    """Ensure Windows desktop compositor does not blur-stretch the window on high-DPI displays."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor DPI Aware
+    except Exception:
+        try:
+            import ctypes
+
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 def _font(size: int) -> pygame.font.Font:
     for path in SYSTEM_CJK_FONTS:
         if path.is_file():
@@ -42,6 +60,31 @@ def _font(size: int) -> pygame.font.Font:
     if FONT_PATH.is_file():
         return pygame.font.Font(str(FONT_PATH), size)
     return pygame.font.SysFont(("Microsoft YaHei", "SimHei", "Arial"), size)
+
+
+def _crisp_text(
+    target: pygame.Surface,
+    value: str,
+    font: pygame.font.Font,
+    position: tuple[int, int],
+    color: tuple[int, int, int] = (242, 238, 229),
+    *,
+    centered: bool = False,
+    shadow: tuple[int, int, int] | None = None,
+) -> pygame.Rect:
+    """Render anti-aliased text with optional subtle drop-shadow, keeping glyph apertures clear."""
+    if shadow is not None:
+        shadow_surf = font.render(value, True, shadow)
+        shadow_rect = (
+            shadow_surf.get_rect(center=(position[0] + 1, position[1] + 1))
+            if centered
+            else shadow_surf.get_rect(topleft=(position[0] + 1, position[1] + 1))
+        )
+        target.blit(shadow_surf, shadow_rect)
+    text = font.render(value, True, color)
+    rect = text.get_rect(center=position) if centered else text.get_rect(topleft=position)
+    target.blit(text, rect)
+    return rect
 
 
 def _outlined_text(
@@ -66,14 +109,19 @@ def _outlined_text(
 class StartScreen:
     """Fixed 940×580 original-style scene, independent of main.py."""
 
+    # Native Flash timeline placement: (button_id, (x, y))
     MENU_BUTTONS = (
-        ("new_game", 7195),
-        ("load_game", 7227),
-        ("instructions", 7257),
-        ("updates", 7261),
-        ("forum", 7265),
+        ("new_game", 7195, (774, 76)),
+        ("load_game", 7227, (749, 129)),
+        ("instructions", 7257, (771, 238)),
+        ("updates", 7261, (749, 300)),
+        ("forum", 7265, (727, 363)),
     )
-    MODE_BUTTONS = (("single", 7351), ("double", 7356), ("mode_back", 7359))
+    MODE_BUTTONS = (
+        ("single", 7351, (752, 119)),
+        ("double", 7356, (747, 207)),
+        ("mode_back", 7359, (752, 302)),
+    )
     PANEL_RECTS = {
         7361: pygame.Rect(76, 0, 702, 494),
         7267: pygame.Rect(126, 24, 688, 514),
@@ -192,31 +240,41 @@ class StartScreen:
         self,
         name: str,
         button_id: int,
-        rect: pygame.Rect | tuple[int, int, int, int],
+        rect: pygame.Rect | tuple[int, int] | tuple[int, int, int, int],
     ) -> pygame.Rect:
-        rect = pygame.Rect(rect)
         up, over, local_hitbox = self._button_state_set(button_id)
-        sx, sy = rect.width / up.get_width(), rect.height / up.get_height()
-        hitbox = pygame.Rect(
-            round(rect.left + local_hitbox.left * sx),
-            round(rect.top + local_hitbox.top * sy),
-            round(local_hitbox.width * sx),
-            round(local_hitbox.height * sy),
-        )
+        if len(rect) == 2:
+            x, y = rect
+            target_rect = pygame.Rect(x, y, up.get_width(), up.get_height())
+            hitbox = pygame.Rect(
+                x + local_hitbox.left,
+                y + local_hitbox.top,
+                local_hitbox.width,
+                local_hitbox.height,
+            )
+        else:
+            target_rect = pygame.Rect(rect)
+            sx, sy = target_rect.width / up.get_width(), target_rect.height / up.get_height()
+            hitbox = pygame.Rect(
+                round(target_rect.left + local_hitbox.left * sx),
+                round(target_rect.top + local_hitbox.top * sy),
+                round(local_hitbox.width * sx),
+                round(local_hitbox.height * sy),
+            )
         self.hitboxes[name] = hitbox
         hovered = self.mouse_position is not None and hitbox.collidepoint(self.mouse_position)
         self._hover_target[name] = hovered
         self._hover_amount.setdefault(name, 0.0)
         amount = self._hover_amount.get(name, 0.0)
-        if up.get_size() != rect.size:
-            up = pygame.transform.smoothscale(up, rect.size)
-        if over.get_size() != rect.size:
-            over = pygame.transform.smoothscale(over, rect.size)
-        self.canvas.blit(up, rect)
+        if up.get_size() != target_rect.size:
+            up = pygame.transform.smoothscale(up, target_rect.size)
+        if over.get_size() != target_rect.size:
+            over = pygame.transform.smoothscale(over, target_rect.size)
+        self.canvas.blit(up, target_rect)
         if amount > 0.001:
             over = over.copy()
             over.set_alpha(round(255 * min(1.0, amount)))
-            self.canvas.blit(over, rect)
+            self.canvas.blit(over, target_rect)
         return hitbox
 
     def set_mouse_position(self, position: tuple[int, int] | None) -> None:
@@ -242,10 +300,10 @@ class StartScreen:
             if frame_count:
                 frame = int(self.animation_time * ORIGINAL_FRAME_RATE) % frame_count + 1
                 self.canvas.blit(self._sprite_frame(sprite_id, frame), (0, 0))
-        self._draw_image("reference_title_patch", (0, 0, 220, 130))
-        self._draw_button("age", 7379, (14, 429, 54, 69))
+        self._draw_image("reference_title_patch", (0, 0, 207, 125))
+        self._draw_button("age", 7379, (14, 433))
         version = _outlined_text(
-            self.canvas, "正式版v19.20", self.fonts[13], (850, 0),
+            self.canvas, "正式版v19.20", self.fonts[13], (850, 2),
             (231, 113, 34), outline=(29, 17, 9),
         )
         self.hitboxes["version"] = version
@@ -258,9 +316,9 @@ class StartScreen:
             "著作权人:厦门热网科技有限公司 出版单位:四三九九网络股份有限公司",
         )
         for index, line in enumerate(footer):
-            _outlined_text(
-                self.canvas, line, self.fonts[13 if index < 2 else 11], (44, 511 + index * 15),
-                (225, 221, 212), outline=(15, 13, 11),
+            _crisp_text(
+                self.canvas, line, self.fonts[13 if index < 2 else 11], (44, 513 + index * 15),
+                (230, 227, 218), shadow=(0, 0, 0),
             )
 
     def _draw_menu(self) -> None:
@@ -268,29 +326,18 @@ class StartScreen:
             name: rect for name, rect in self.hitboxes.items()
             if name in ("age", "version", "history_updates")
         }
-        if self.menu_mode == "mode":
-            buttons = self.MODE_BUTTONS
-            positions = ((750, 116), (750, 218), (750, 320))
-        else:
-            buttons = self.MENU_BUTTONS
-            positions = ((750, 44), (750, 135), (750, 226), (750, 317), (750, 408))
-        sizes = {
-            "new_game": (168, 117), "load_game": (160, 111),
-            "instructions": (162, 104), "updates": (159, 112),
-            "forum": (184, 133), "single": (162, 104),
-            "double": (166, 100), "mode_back": (153, 94),
-        }
-        for (name, asset_id), (x, y) in zip(buttons, positions):
-            self._draw_button(name, asset_id, (x, y, *sizes[name]))
+        buttons = self.MODE_BUTTONS if self.menu_mode == "mode" else self.MENU_BUTTONS
+        for name, asset_id, pos in buttons:
+            self._draw_button(name, asset_id, pos)
 
     def _draw_panel_frame(self, asset_id: int) -> None:
         self._draw_image(asset_id, self.PANEL_RECTS[asset_id])
 
     def _draw_updates(self) -> None:
         self._draw_panel_frame(7361)
-        self._draw_button("history_updates", 7374, (130, 378, 198, 36))
-        white, yellow = (239, 236, 230), (255, 193, 0)
-        _outlined_text(self.canvas, "勇者之刃【v19.20】版本更新内容：", self.fonts[13], (171, 120), yellow)
+        self._draw_button("history_updates", 7374, (130, 378))
+        white, yellow = (242, 239, 233), (255, 193, 0)
+        _crisp_text(self.canvas, "勇者之刃【v19.20】版本更新内容：", self.fonts[13], (171, 120), yellow, shadow=(35, 20, 10))
         lines = (
             ("1.新增【魔神系统】：宠物觉醒，与主人合体变身魔神，当前开放【冥王龙觉醒】", 144),
             ("  觉醒道具可在三个炼狱中击败boss有小几率获得", 160),
@@ -299,9 +346,9 @@ class StartScreen:
             ("  2.提升了宠物狂牛战士的技能释放频率", 232),
         )
         for line, y in lines:
-            _outlined_text(self.canvas, line, self.fonts[13], (171, y), white)
-        _outlined_text(self.canvas, "勇者之刃团队 2025.1.24", self.fonts[12], (557, 432), yellow)
-        self._draw_button("panel_back", 7299, (356, 432, 150, 82))
+            _crisp_text(self.canvas, line, self.fonts[13], (171, y), white, shadow=(35, 20, 10))
+        _crisp_text(self.canvas, "勇者之刃团队 2025.1.24", self.fonts[12], (557, 432), yellow, shadow=(35, 20, 10))
+        self._draw_button("panel_back", 7299, (345, 430))
 
     def _draw_instructions(self) -> None:
         self._draw_panel_frame(7267)
@@ -324,10 +371,10 @@ class StartScreen:
             )),
         )
         for x, (heading, controls) in zip((172, 477), lines):
-            _outlined_text(self.canvas, heading, self.fonts[13], (x, 142), (255, 193, 0))
+            _crisp_text(self.canvas, heading, self.fonts[13], (x, 142), (255, 193, 0), shadow=(35, 20, 10))
             for row, line in enumerate(controls):
-                _outlined_text(self.canvas, line, self.fonts[12], (x, 166 + row * 19), (238, 235, 228))
-        self._draw_button("panel_back", 7359, (356, 432, 150, 82))
+                _crisp_text(self.canvas, line, self.fonts[12], (x, 166 + row * 19), (240, 237, 230), shadow=(35, 20, 10))
+        self._draw_button("panel_back", 7359, (345, 410))
 
     def _draw_age_notice(self) -> None:
         self._draw_panel_frame(7380)
@@ -336,8 +383,8 @@ class StartScreen:
             "请合理安排游戏时间，注意保护个人信息。", "未成年人请在监护人指导下进行游戏。",
         )
         for line, y in zip(lines, (115, 170, 198, 226)):
-            _outlined_text(self.canvas, line, self.fonts[14], (171, y), (238, 235, 228))
-        self._draw_button("panel_back", 7359, (356, 432, 150, 82))
+            _crisp_text(self.canvas, line, self.fonts[14], (171, y), (242, 239, 233), shadow=(35, 20, 10))
+        self._draw_button("panel_back", 7359, (345, 410))
 
     def _draw_saves(self) -> None:
         panel_rect = pygame.Rect(106, 47, 728, 486)
@@ -350,7 +397,7 @@ class StartScreen:
             panel.blit(title, title.get_rect(center=(364, 45)))
         self.canvas.blit(panel, panel_rect)
         self.hitboxes["save_panel"] = panel_rect
-        self._draw_button("save_close", 7395, (770, 87, 22, 21))
+        self._draw_button("save_close", 7395, (770, 87))
         for row in range(4):
             for column in range(2):
                 slot = row * 2 + column + 1
@@ -358,10 +405,10 @@ class StartScreen:
                 text = self.save_entries[slot - 1]
                 lines = tuple(part.strip() for part in text.splitlines() if part.strip()) or ("空存档",)
                 if len(lines) == 1:
-                    _outlined_text(self.canvas, lines[0], self.fonts[13], (x, y), (221, 214, 201), centered=True)
+                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y), (228, 222, 211), centered=True, shadow=(20, 15, 10))
                 else:
-                    _outlined_text(self.canvas, lines[0], self.fonts[13], (x, y - 9), (238, 230, 216), centered=True)
-                    _outlined_text(self.canvas, lines[1], self.fonts[11], (x, y + 10), (211, 197, 176), centered=True)
+                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y - 9), (242, 236, 224), centered=True, shadow=(20, 15, 10))
+                    _crisp_text(self.canvas, lines[1], self.fonts[11], (x, y + 10), (218, 206, 188), centered=True, shadow=(20, 15, 10))
                 self.hitboxes[f"slot_{slot}"] = pygame.Rect(x - 157, y - 37, 314, 74)
 
     def draw(self) -> pygame.Surface:
@@ -449,10 +496,12 @@ def run_preview(path: Path) -> None:
 
 
 def run_window() -> None:
+    _enable_windows_dpi_awareness()
     pygame.init()
     window = pygame.display.set_mode(STAGE_SIZE, pygame.RESIZABLE)
-    pygame.display.set_caption("勇者之刃 - 原版开始界面预览")
+    pygame.display.set_caption("勇者之刃 - 原版开始界面 (1: 原生940×580 | 2: 高清2倍1880×1160 | F: 全屏)")
     clock, scene, running = pygame.time.Clock(), StartScreen(), True
+    is_fullscreen = False
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -466,13 +515,29 @@ def run_window() -> None:
                 scene.set_mouse_position(position)
                 if position is not None:
                     scene.click(position)
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                if scene.panel is not None:
-                    scene.panel = None
-                elif scene.menu_mode != "main":
-                    scene.menu_mode = "main"
-                else:
-                    running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if is_fullscreen:
+                        is_fullscreen = False
+                        window = pygame.display.set_mode(STAGE_SIZE, pygame.RESIZABLE)
+                    elif scene.panel is not None:
+                        scene.panel = None
+                    elif scene.menu_mode != "main":
+                        scene.menu_mode = "main"
+                    else:
+                        running = False
+                elif event.key == pygame.K_1:
+                    is_fullscreen = False
+                    window = pygame.display.set_mode(STAGE_SIZE, pygame.RESIZABLE)
+                elif event.key == pygame.K_2:
+                    is_fullscreen = False
+                    window = pygame.display.set_mode((STAGE_SIZE[0] * 2, STAGE_SIZE[1] * 2), pygame.RESIZABLE)
+                elif event.key in (pygame.K_f, pygame.K_F11):
+                    is_fullscreen = not is_fullscreen
+                    if is_fullscreen:
+                        window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                    else:
+                        window = pygame.display.set_mode(STAGE_SIZE, pygame.RESIZABLE)
         delta_seconds = clock.tick(FPS) / 1000.0
         pointer = _stage_position(pygame.mouse.get_pos(), window.get_size())
         scene.set_mouse_position(pointer)
@@ -481,7 +546,10 @@ def run_window() -> None:
         width, height = window.get_size()
         scale = min(width / STAGE_SIZE[0], height / STAGE_SIZE[1])
         size = (round(STAGE_SIZE[0] * scale), round(STAGE_SIZE[1] * scale))
-        rendered = pygame.transform.smoothscale(canvas, size)
+        if size == STAGE_SIZE:
+            rendered = canvas
+        else:
+            rendered = pygame.transform.smoothscale(canvas, size)
         window.fill((0, 0, 0))
         window.blit(rendered, ((width - size[0]) // 2, (height - size[1]) // 2))
         pygame.display.flip()
