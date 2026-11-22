@@ -109,13 +109,12 @@ def _outlined_text(
 class StartScreen:
     """Fixed 940×580 original-style scene, independent of main.py."""
 
-    # Native Flash timeline placement with Shape Bounds offsets accounted for:
+    # Native Flash timeline placement with Shape Bounds offsets accounted for (forum removed & 4 buttons balanced):
     MENU_BUTTONS = (
-        ("new_game", 7195, (748, 35)),
-        ("load_game", 7227, (749, 129)),
-        ("instructions", 7257, (749, 218)),
-        ("updates", 7261, (749, 300)),
-        ("forum", 7265, (727, 363)),
+        ("new_game", 7195, (748, 48)),
+        ("load_game", 7227, (749, 146)),
+        ("instructions", 7257, (749, 244)),
+        ("updates", 7261, (749, 342)),
     )
     MODE_BUTTONS = (
         ("single", 7351, (752, 119)),
@@ -465,9 +464,6 @@ class StartScreen:
                 self.panel = None if self.panel == "instructions" else "instructions"
             elif name == "updates":
                 self.panel = None if self.panel == "updates" else "updates"
-            elif name == "forum":
-                webbrowser.open("http://my.4399.com/space-mtag-tagid-81127.html")
-                return "forum"
             elif name == "mode_back":
                 self.menu_mode = "main"
             elif name in ("single", "double"):
