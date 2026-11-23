@@ -22,3 +22,17 @@ Thumbs.db
 .idea/
 
 .build/
+
+# Binary SWFs and raw debug dumps
+yzzr_all_swf/
+tools/debug_frames/
+
+# Intermediate previews and test dumps
+save_cloud.txt
+save_decrypted.json
+save_universal.txt
+save_universal_slot0.txt
+python_assets/*_preview.png
+python_assets/*_test.png
+python_assets/preview_*.png
+python_assets/weapon_previews/

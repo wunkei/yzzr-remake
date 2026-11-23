@@ -8,6 +8,15 @@ from pathlib import Path
 
 import pygame
 
+from levels import ALL_STAGES, STAGES, TUTORIAL_STAGE
+from lobby import LobbyScene
+from onboarding import (
+    WEAPON_NAMES,
+    OpeningCutscene,
+    WeaponSelectionScreen,
+)
+from start_screen import STAGE_SIZE, StartScreen
+
 
 WIDTH, HEIGHT = 960, 540
 FPS = 60
@@ -24,7 +33,17 @@ ENEMY_ATTACK_FRAMES = (34, 51)
 # Placeholder enemies use the common 100-tick EnemySkin resistance as a base;
 # actual monsters can differ and need their own EnemySkin data.
 DEFAULT_ENEMY_HURTSTUN_FRAMES = 100
-FALLBACK_ATTACK_HITSTUN_FRAMES = {"normal": 10, "run": 14, "up": 24, "down": 18, "air": 12}
+FALLBACK_ATTACK_HITSTUN_FRAMES = {
+    "normal": 10,
+    "run": 14,
+    "up": 24,
+    "down": 18,
+    "air": 12,
+    "skill1": 22,
+    "skill2": 24,
+    "skill3": 24,
+    "skill4": 35,
+}
 SWORDSMAN_SKILL_FILE = Path(__file__).resolve().parent / "python_assets" / "original_swordsman_skills.json"
 try:
     with SWORDSMAN_SKILL_FILE.open("r", encoding="utf-8") as skill_file:
@@ -158,7 +177,13 @@ class OriginalCharacterVisual:
     S4_COSTUME_TIMELINE = ROOT / "python_assets" / "s4_costume_timeline.json"
     WEAPON_MANIFEST = ROOT / "python_assets" / "weapon_timelines.json"
     WEAPON_HITBOX_MANIFEST = ROOT / "python_assets" / "weapon_hitboxes.json"
-    WEAPON_SWF_SPRITE_IDS = {1235: 1681, 1108: 1904, 1168: 1235, 1044: 1044}
+    WEAPON_SWF_SPRITE_IDS = {
+        1235: 1681,
+        1108: 1904,
+        1168: 1235,
+        1044: 1044,
+        492: 492,
+    }
     SWORD_LAYER_DIRS = {
         1235: ROOT / "python_assets" / "weapon_layers" / "gold9_sword",
     }
@@ -167,6 +192,7 @@ class OriginalCharacterVisual:
         (1108, "DefineSprite_1904_剑金11"),
         (1168, "DefineSprite_1235_剑蓝1"),
         (1044, "DefineSprite_1044_剑蓝4"),
+        (492, "DefineSprite_492_剑金10"),
     )
     try:
         sys.path.insert(0, str(ROOT / "tools"))
@@ -188,16 +214,18 @@ class OriginalCharacterVisual:
         1235: {"scale": _CFG_GOLD9_SCALE, "offset": _CFG_GOLD9_OFFSET},
         1168: {"scale": 1.00, "offset": (-10, 10)},
         1044: {"scale": 1.00, "offset": (-10, 10)},
+        492: {"scale": 1.00, "offset": (0, 0)},
     }
     CHARACTER_CACHE_DIR = ROOT / "python_assets" / "character_cache"
     CHARACTER_CACHE_MANIFEST = CHARACTER_CACHE_DIR / "manifest.json"
     COSTUME_KEYS = ("default", "s4")
-    WEAPON_KEYS = ("gold9", "gold11", "blue1", "blue4")
+    WEAPON_KEYS = ("gold9", "gold11", "blue1", "blue4", "rose")
     WEAPON_REGISTERS = {
         1235: (-129, -931),
-        1108: (-335, -928),
+        1108: (-248, -928),
         1168: (-169, -933),
         1044: (-123, -933),
+        492: (-167, -937),
     }
 
     def __init__(self, load_cache=True):
@@ -500,11 +528,17 @@ class OriginalCharacterVisual:
         if not frame_boxes:
             return []
 
+        # For 跑攻 (79-89), the visible sword slash only occurs on frames 82-85.
+        # Frames 79-81 are dash windup slide, and 86-89 are recovery.
+        current_action = getattr(self, "action", None)
+        if (current_action == "跑攻" or 79 <= self.frame <= 89) and self.frame not in range(82, 86):
+            return []
+
         weapon_id, _sprite_name = self.WEAPONS[self.weapon_index]
         tuning = self.WEAPON_TUNING[weapon_id]
         scale = float(tuning["scale"])
         canvas_width = sprite_data["canvas_size"][0] * scale
-        register_x, register_y = self.weapon_register
+        register_x, register_y = self.WEAPON_REGISTERS.get(weapon_id, self.weapon_register)
         offset_x, offset_y = self.weapon_offset
         boxes = []
         for left, top, right, bottom in frame_boxes:
@@ -522,6 +556,22 @@ class OriginalCharacterVisual:
             world_right += offset_x * facing
             world_top = world_bottom - self.anchor_y + register_y + top + offset_y
             world_bottom_box = world_bottom - self.anchor_y + register_y + bottom + offset_y
+
+            # Adjust hitbox boundaries to match visual effects and prevent phantom hits / blind spots
+            if current_action == "技能1" or 259 <= self.frame <= 277:
+                # Expand vertical reach to cover the full visible energy wave down to ground
+                world_top = min(world_top, world_bottom - 135)
+                world_bottom_box = max(world_bottom_box, world_bottom)
+
+            # Universal point-blank and forward coverage:
+            # Eliminates blind spots right against the player body while eliminating phantom hits behind
+            if facing > 0:
+                if world_right > world_x:
+                    world_left = world_x
+            else:
+                if world_left < world_x:
+                    world_right = world_x
+
             boxes.append(
                 pygame.Rect(
                     math.floor(world_left),
@@ -739,7 +789,7 @@ class Player:
         self.vy = 0.0
         self.facing = 1
         self.hp = self.max_hp = 100
-        self.mp = self.max_mp = 60
+        self.mp = self.max_mp = 100000
         self.on_ground = True
         self.attack_lock = 0.0
         self.combo_window = 0.0
@@ -769,6 +819,12 @@ class Player:
         self.skill_hit_targets = {}
         self.current_attack_run = False
         self.last_attack_kind = "normal"
+        self.attack_facing = 1
+
+    def is_attack_locked(self):
+        return self.hurt_timer > 0 or self.attack_active or self.attack_lock > 0 or bool(
+            self.visual and self.visual.one_shot
+        )
 
     def direction_key_down(self, key, now):
         if key not in self.LEFT_KEYS + self.RIGHT_KEYS:
@@ -778,6 +834,11 @@ class Player:
             self.dash_key = key
             self.is_dashing = True
         self.last_direction_tap[key] = now
+        if not self.is_attack_locked():
+            if key in self.LEFT_KEYS:
+                self.facing = -1
+            elif key in self.RIGHT_KEYS:
+                self.facing = 1
 
     def direction_key_up(self, key):
         if key == self.dash_key:
@@ -791,6 +852,8 @@ class Player:
             if row is None:
                 continue
             self.action_gravity = numeric_value(row.get("gravity", 2), 2)
+            if self.action_gravity == 0:
+                self.vy = 0.0
             motion = row.get("motion", {})
             steps = original_run_power_steps(
                 motion.get("x", 0), motion.get("y", 0), motion.get("duration", 0)
@@ -810,14 +873,15 @@ class Player:
         self.is_dashing = bool(dash_held and direction)
         sprinting = self.is_dashing or keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
         speed = 382.5 if self.is_dashing else (340 if sprinting else 255)
-        attack_controls_locked = self.hurt_timer > 0 or bool(
-            self.visual and self.visual.one_shot and self.last_attack_kind != "air"
-        )
+        attack_controls_locked = self.is_attack_locked()
         if self.hurt_timer > 0:
             self.hurt_timer = max(0, self.hurt_timer - dt)
             self.vx *= max(0, 1 - 4 * dt)
         elif attack_controls_locked:
-            self.vx = 0
+            if not self.on_ground and self.last_attack_kind == "air":
+                self.vx = direction * speed * 0.6
+            else:
+                self.vx = 0
         else:
             self.vx = direction * speed
         if direction and not attack_controls_locked:
@@ -829,6 +893,9 @@ class Player:
             fall_dt = dt if self.air_down_charge_timer == 0 else 0
         else:
             fall_dt = dt
+        if self.action_gravity == 0:
+            self.vy = 0.0
+            fall_dt = 0.0
         if fall_dt > 0:
             self.vy += GRAVITY * (self.action_gravity / 2) * fall_dt
             self.y += self.vy * fall_dt
@@ -889,8 +956,14 @@ class Player:
 
     def attack(self, held_keys=None, requested_kind=None):
         if self.attack_lock <= 0 and self.hurt_timer <= 0:
-            run_attack = requested_kind is None and self.is_dashing and self.on_ground
             held_keys = held_keys or pygame.key.get_pressed()
+            horiz_dir = int(bool(held_keys[pygame.K_d] or held_keys[pygame.K_RIGHT])) - int(
+                bool(held_keys[pygame.K_a] or held_keys[pygame.K_LEFT])
+            )
+            if horiz_dir:
+                self.facing = horiz_dir
+
+            run_attack = requested_kind is None and self.is_dashing and self.on_ground
             if requested_kind:
                 attack_kind = requested_kind
             elif run_attack:
@@ -928,6 +1001,7 @@ class Player:
             self.attack_motion_steps = []
             self.attack_motion_index = 0
             self.attack_motion_clock = 0
+            self.attack_facing = self.facing
             self.attack_motion_direction = self.facing
             self.active_action = action
             self.last_action_frame = 0
@@ -943,7 +1017,7 @@ class Player:
             self.attack_targets.clear()
             self.skill_hit_targets.clear()
             skill_cd_frames = int(skill.get("cooldown", 0) or 0)
-            skill_cooldown = skill_cd_frames / ANIMATION_FPS
+            skill_cooldown = 0.5 if skill_cd_frames > 0 else 0.0
             lock_frames = ATTACK_LOCK_FRAMES.get(attack_kind, 8)
             self.attack_lock = lock_frames / ANIMATION_FPS
             if self.visual:
@@ -963,7 +1037,7 @@ class Player:
                 self.air_down_charge_timer = charge_frames / fps
                 self.vy = 0
             if skill_cooldown > 0:
-                self.skill_cooldowns[skill_type] = skill_cooldown
+                self.skill_cooldowns[skill_type] = 0.5
             self.mp -= mana_cost
             if attack_kind == "skill1":
                 self.invincible = max(self.invincible, 8 / ANIMATION_FPS)
@@ -985,11 +1059,27 @@ class Player:
         elif attack_kind == "down":
             width, height = 88, 78
             top = self.rect.y + 28
+        elif attack_kind == "run":
+            width, height = 96, 56
+            top = self.rect.y + 7
+        elif attack_kind == "skill1":
+            width, height = 280, 100
+            top = self.rect.y - 20
+        elif attack_kind == "skill2":
+            width, height = 140, 110
+            top = self.rect.y - 40
+        elif attack_kind == "skill3":
+            width, height = 180, 130
+            top = self.rect.y - 30
+        elif attack_kind == "skill4":
+            width, height = 360, 220
+            top = self.rect.y - 120
         else:
             width = 118 if run_attack else 76
             height = 56 if run_attack else 48
             top = self.rect.y + (7 if run_attack else 12)
-        if self.facing > 0:
+        facing = getattr(self, "attack_facing", self.facing) if self.attack_active else self.facing
+        if facing > 0:
             return pygame.Rect(self.rect.right - 3, top, width, height)
         return pygame.Rect(self.rect.left - width + 3, top, width, height)
 
@@ -1012,6 +1102,7 @@ class Player:
         self.hp = max(0, self.hp - damage)
         self.hurt_timer = 0.18
         self.attack_active = False
+        self.attack_facing = self.facing
         self.active_action = None
         self.action_gravity = 2
         self.attack_lock = 0
@@ -1025,10 +1116,30 @@ class Player:
 
 
 class Enemy:
-    def __init__(self, x, kind=0):
+    def __init__(self, x, kind=0, *, name=None, max_hp=None, speed=None, attack_damage=None):
         self.kind = kind
-        self.w, self.h = (44, 58) if kind == 0 else (58, 78)
-        self.rect = pygame.Rect(x, GROUND_Y - self.h, self.w, self.h)
+        if kind == 2:
+            self.w, self.h = (76, 96) if max_hp is None or max_hp < 400 else (88, 110)
+            self.hp = self.max_hp = max_hp if max_hp is not None else 280
+            self.speed = speed if speed is not None else 65
+            self.stun_resistance_frames = 45
+            self.name = name or "关卡领主"
+            self.attack_damage = attack_damage if attack_damage is not None else 18
+        elif kind == 1:
+            self.w, self.h = (58, 78)
+            self.hp = self.max_hp = max_hp if max_hp is not None else 95
+            self.speed = speed if speed is not None else 54
+            self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
+            self.name = name or "重装护卫"
+            self.attack_damage = attack_damage if attack_damage is not None else 13
+        else:
+            self.w, self.h = (44, 58)
+            self.hp = self.max_hp = max_hp if max_hp is not None else 42
+            self.speed = speed if speed is not None else 78
+            self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
+            self.name = name or "前哨小怪"
+            self.attack_damage = attack_damage if attack_damage is not None else 8
+        self.rect = pygame.Rect(round(x), GROUND_Y - self.h, self.w, self.h)
         self.x = float(x)
         self.y = float(self.rect.y)
         self.vy = 0.0
@@ -1037,19 +1148,19 @@ class Enemy:
         self.knockback_index = 0
         self.knockback_clock = 0.0
         self.knockback_direction = 1
-        self.hp = self.max_hp = 42 if kind == 0 else 95
-        self.speed = 78 if kind == 0 else 54
         self.attack_cd = random.uniform(0.3, 0.9)
         self.attack_frame = None
         self.attack_elapsed_frames = 0.0
         self.attack_did_hit = False
         self.hurt_timer = 0.0
-        self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
         self.flash = 0.0
         self.facing = -1
 
     def hitbox(self):
-        width, height = ENEMY_HITBOX_SIZE
+        if self.kind == 2:
+            width, height = round(self.w * 0.9), round(self.h * 0.95)
+        else:
+            width, height = ENEMY_HITBOX_SIZE
         return pygame.Rect(
             self.rect.centerx - width // 2,
             self.rect.bottom - height + 10,
@@ -1060,7 +1171,10 @@ class Enemy:
     def attack_hitbox(self):
         if self.attack_frame != ENEMY_ATTACK_FRAMES[0]:
             return None
-        left, top, width, height = ENEMY_ATTACK_HITBOX
+        if self.kind == 2:
+            left, top, width, height = (-20, -round(self.h * 0.9), round(self.w * 0.6), round(self.h * 0.5))
+        else:
+            left, top, width, height = ENEMY_ATTACK_HITBOX
         if self.facing < 0:
             left = -left - width
         return pygame.Rect(
@@ -1136,9 +1250,18 @@ class Enemy:
             self.knockback_direction = 1 if self.rect.centerx > source_x else -1
         else:
             self.knockback_direction = attacker_facing
-        self.knockback_steps = original_run_power_steps(
-            knockback, launch_speed, motion_duration, parabola=0.2
-        )
+        self.vy = 0.0
+        if launch_speed < 0:
+            self.knockback_steps = []
+            self.y = float(GROUND_Y - self.h)
+            self.rect.y = round(self.y)
+            self.airborne = False
+        else:
+            self.knockback_steps = original_run_power_steps(
+                knockback, launch_speed, motion_duration, parabola=0.2
+            )
+            if launch_speed > 0 or self.y + self.h < GROUND_Y:
+                self.airborne = True
         self.knockback_index = 0
         self.knockback_clock = 0.0
 
@@ -1156,42 +1279,533 @@ class Bolt:
         self.life -= dt
 
 
+class SoundManager:
+    def __init__(self):
+        self.available = False
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            self.available = True
+        except Exception:
+            self.available = False
+        self.sounds = {}
+        if self.available:
+            sound_map = {
+                "hit": ROOT / "Music_v5/sounds/2_战士击中声音.mp3",
+                "swing": ROOT / "Music_v5/sounds/3_战士挥刀声音.mp3",
+                "skill4": ROOT / "Music_v5/sounds/1_战士转职技能4声音.mp3",
+            }
+            for k, p in sound_map.items():
+                if p.is_file():
+                    try:
+                        self.sounds[k] = pygame.mixer.Sound(str(p))
+                        self.sounds[k].set_volume(0.5)
+                    except Exception:
+                        pass
+
+    def play(self, name):
+        if self.available and name in self.sounds:
+            try:
+                self.sounds[name].play()
+            except Exception:
+                pass
+
+
+_STAGE_BACKGROUND_CACHE = {}
+_DOOR_FRAMES_CACHE = []
+_DUMMY_FRAMES_CACHE = {}
+
+
 class Game:
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("勇者之刃 · Python 核心玩法原型")
+        pygame.display.set_caption("勇者之刃 · 信仰篇 (全流程演示版)")
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.Font(None, 26)
-        self.big_font = pygame.font.Font(None, 54)
+        self._init_fonts()
+        self.sound_manager = SoundManager()
         self.player_visual = OriginalCharacterVisual()
         self.show_hitboxes = False
-        self.reset()
+        self.menu_hitboxes: dict[str, pygame.Rect] = {}
+        self.hitbox_pill_rect: pygame.Rect = pygame.Rect(WIDTH - 156, 12, 144, 28)
 
-    def reset(self):
-        self.player_visual.play("站", loop=True, force=True)
-        self.player = Player(self.player_visual)
-        self.enemies = []
-        self.bolts = []
+        self.start_screen = StartScreen()
+        self.game_state = "START_SCREEN"
+        self.current_slot = 1
+        self.current_level = 1
+        self.starting_level = 1
+        self.total_kills = 0
+        self.shake_timer = 0.0
+        self.shake_intensity = 0
+
+        self.opening_cutscene = None
+        self.weapon_screen = None
+        self.onboarding_weapons = (0, 1)
+        self.target_starting_level = 1
+        self.mouse_stage_pos = None
+        self.dummy_frames = {}
+        self.lobby = LobbyScene(self)
+
+        self._load_stage_backgrounds()
+        self._load_door_frames()
+        self._load_dummy_frames()
+        self.reset(level=1, full=True)
+
+    def trigger_screen_shake(self, duration=0.2, intensity=8):
+        self.shake_timer = max(getattr(self, "shake_timer", 0.0), duration)
+        self.shake_intensity = max(getattr(self, "shake_intensity", 0), intensity)
+
+    def _init_fonts(self):
+        cjk_paths = [
+            Path("C:/Windows/Fonts/msyh.ttc"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+            ROOT / "python_assets/start_screen/assets/fonts/2639_黑体.ttf",
+        ]
+        chosen = None
+        for p in cjk_paths:
+            if p.is_file():
+                chosen = str(p)
+                break
+
+        def load_font(size):
+            if chosen:
+                try:
+                    return pygame.font.Font(chosen, size)
+                except Exception:
+                    pass
+            return pygame.font.Font(None, size)
+
+        self.font = load_font(20)
+        self.ui_font = load_font(24)
+        self.big_font = load_font(44)
+        self.title_font = load_font(60)
+        self.small_font = load_font(12)
+        self.pill_font = load_font(14)
+
+    def _load_stage_backgrounds(self):
+        global _STAGE_BACKGROUND_CACHE
+        if not _STAGE_BACKGROUND_CACHE:
+            for level, stage in ALL_STAGES.items():
+                if stage.background.is_file():
+                    try:
+                        im = pygame.image.load(str(stage.background))
+                        target_w = max(WORLD_WIDTH, round(im.get_width() * HEIGHT / im.get_height()))
+                        _STAGE_BACKGROUND_CACHE[level] = pygame.transform.smoothscale(
+                            im, (target_w, HEIGHT)
+                        )
+                    except pygame.error:
+                        pass
+        self.bg_surfaces = _STAGE_BACKGROUND_CACHE
+
+    def _load_door_frames(self):
+        global _DOOR_FRAMES_CACHE
+        if not _DOOR_FRAMES_CACHE:
+            door_dir = ROOT / "python_assets" / "door"
+            if not door_dir.is_dir() or not list(door_dir.glob("*.png")):
+                door_dir = ROOT / "Map0_v1910/sprites/DefineSprite_181_src.Door"
+            if door_dir.is_dir():
+                for i in range(1, 17):
+                    fpath = door_dir / f"{i}.png"
+                    if fpath.is_file():
+                        try:
+                            _DOOR_FRAMES_CACHE.append(pygame.image.load(str(fpath)))
+                        except Exception:
+                            pass
+        self.door_frames = _DOOR_FRAMES_CACHE
+
+    def _load_dummy_frames(self):
+        global _DUMMY_FRAMES_CACHE
+        if not _DUMMY_FRAMES_CACHE:
+            base = ROOT / "python_assets" / "onboarding" / "enemies"
+            for i in range(1, 5):
+                p = base / f"dummy{i}" / "1.png"
+                if p.is_file():
+                    try:
+                        im = pygame.image.load(str(p)).convert_alpha()
+                        dh = 58 + 24
+                        dw = round(im.get_width() * dh / im.get_height())
+                        _DUMMY_FRAMES_CACHE[i] = pygame.transform.smoothscale(im, (dw, dh))
+                    except Exception:
+                        pass
+        self.dummy_frames = _DUMMY_FRAMES_CACHE
+
+    def _render_stage_canvas(self, canvas):
+        sw, sh = canvas.get_size()
+        scale = min(WIDTH / sw, HEIGHT / sh)
+        target_size = (round(sw * scale), round(sh * scale))
+        if target_size == (sw, sh):
+            rendered = canvas
+        else:
+            rendered = pygame.transform.smoothscale(canvas, target_size)
+        self.screen.fill((0, 0, 0))
+        self.screen.blit(rendered, ((WIDTH - target_size[0]) // 2, (HEIGHT - target_size[1]) // 2))
+        self._draw_hitbox_pill()
+        pygame.display.flip()
+
+    def _map_mouse_to_stage(self, pos):
+        sw, sh = STAGE_SIZE
+        scale = min(WIDTH / sw, HEIGHT / sh)
+        offset_x = (WIDTH - sw * scale) / 2
+        offset_y = (HEIGHT - sh * scale) / 2
+        x = (pos[0] - offset_x) / scale
+        y = (pos[1] - offset_y) / scale
+        if 0 <= x < sw and 0 <= y < sh:
+            return (round(x), round(y))
+        return None
+
+    def handle_start_action(self, action):
+        if action and action.startswith(("new_save_slot_", "load_slot_")):
+            slot = int(action.rsplit("_", 1)[1])
+            self.start_screen.panel = None
+            self.start_screen.menu_mode = "main"
+            if action.startswith("new_save_slot_"):
+                self.start_new_game_onboarding(slot=slot, target_level=0)
+            elif action.startswith("load_slot_"):
+                self.enter_lobby(slot=slot)
+
+    def start_new_game_onboarding(self, slot=1, target_level=1):
+        self.current_slot = slot
+        self.target_starting_level = target_level
+        self.onboarding_weapons = (0, 1)
+        self.game_state = "OPENING"
+        self.opening_cutscene = OpeningCutscene(on_finish=self._on_opening_finished)
+
+    def _on_opening_finished(self):
+        self.game_state = "WEAPON_SELECT"
+        self.weapon_screen = WeaponSelectionScreen(
+            on_confirm=self._on_weapons_confirmed,
+            on_back=self._on_weapon_select_back,
+        )
+
+    def _on_weapon_select_back(self):
+        self.game_state = "START_SCREEN"
+
+    def _apply_onboarding_weapon(self, use_secondary=False):
+        left_w, right_w = getattr(self, "onboarding_weapons", (0, 1))
+        chosen_w = right_w if use_secondary else left_w
+        # Mapping: 0 (巨剑) -> 0 (gold9), 1 (法杖) -> 2 (blue1), 2 (拳套) -> 4 (rose)
+        # If dual-wielding, alternate between weapon variants on switch
+        if left_w == right_w and use_secondary:
+            alt_map = {0: 1, 1: 3, 2: 4}
+            v_idx = alt_map.get(chosen_w, 0)
+        else:
+            weapon_map = {0: 0, 1: 2, 2: 4}
+            v_idx = weapon_map.get(chosen_w, 0)
+
+        p = getattr(self, "player", None)
+        if p and p.visual and hasattr(p.visual, "WEAPONS") and v_idx < len(p.visual.WEAPONS):
+            if getattr(p.visual, "use_cache", False):
+                p.visual.weapon_index = v_idx
+                p.visual._set_active_combo(p.visual.costume_index, v_idx)
+            else:
+                p.visual._load_weapon(v_idx)
+
+    def _on_weapons_confirmed(self, weapons):
+        self.onboarding_weapons = weapons
+        self.current_weapon_hand = 0
+        self.start_tutorial(slot=self.current_slot, target_level=self.target_starting_level)
+
+    def start_tutorial(self, slot=1, target_level=1):
+        self.current_slot = slot
+        self.target_starting_level = target_level
+        self.starting_level = 888
+        self.current_level = 888
+        self.total_kills = 0
+        self.reset(level=888, full=True)
+        self.current_weapon_hand = 0
+        self._apply_onboarding_weapon(use_secondary=False)
+        self.game_state = "PLAYING"
+
+    def finish_tutorial(self):
+        left_w, right_w = getattr(self, "onboarding_weapons", (0, 1))
+        w_str = f"{WEAPON_NAMES.get(left_w, '巨剑')}/{WEAPON_NAMES.get(right_w, '法杖')}"
+        if hasattr(self, "start_screen"):
+            entries = list(self.start_screen.save_entries)
+            entries[self.current_slot - 1] = f"槽位 {self.current_slot}: Lv.1 剑士\n完成试炼 [{w_str}]"
+            self.start_screen.set_save_entries(entries)
+        target_lvl = getattr(self, "target_starting_level", 0)
+        if target_lvl == 0:
+            self.enter_lobby(slot=self.current_slot)
+        else:
+            self.start_game(slot=self.current_slot, level=target_lvl)
+            self.wave_banner_text = f"新手试炼完成！开始挑战第 {target_lvl} 关！"
+            self.wave_banner_timer = 2.5
+
+    def enter_lobby(self, slot=None):
+        if slot is not None:
+            self.current_slot = slot
+        self.current_level = 0
         self.wave = 0
         self.wave_pause = 0.0
+        self.enemies = []
+        self.bolts = []
         self.game_over = False
         self.victory = False
+        self.door_active = False
+        self.wave_banner_text = ""
+        self.wave_banner_timer = 0.0
+
+        if not hasattr(self, "player") or self.player is None:
+            if hasattr(self, "player_visual") and self.player_visual:
+                self.player_visual.play("站", loop=True, force=True)
+            self.player = Player(getattr(self, "player_visual", None))
+        else:
+            p = self.player
+            p.hp = p.max_hp
+            p.mp = p.max_mp
+            p.rect.x = 240
+            p.rect.bottom = GROUND_Y
+            p.x = 240.0
+            p.y = float(p.rect.y)
+            p.vx = 0.0
+            p.vy = 0.0
+            if hasattr(p, "visual") and p.visual:
+                p.visual.play("站", loop=True, force=True)
+
+        self.game_state = "LOBBY"
+        if hasattr(self, "lobby") and self.lobby:
+            self.lobby.show_toast(f"欢迎来到勇者村！按 M 或在右下角选择地图出征。")
+
+    def start_game(self, slot=1, level=1):
+        self.current_slot = slot
+        self.starting_level = level
+        self.total_kills = 0
+        self.reset(level=level, full=True)
+        if hasattr(self, "onboarding_weapons") and self.onboarding_weapons:
+            self._apply_onboarding_weapon(use_secondary=bool(getattr(self, "current_weapon_hand", 0) == 1))
+        self.game_state = "PLAYING"
+
+    def start_level(self, level):
+        self.reset(level=level, full=False)
+        self.game_state = "PLAYING"
+
+    def reset(self, level=1, full=False):
+        self.current_level = level
+        self.wave = 0
+        self.wave_pause = 0.0
+        self.enemies = []
+        self.bolts = []
+        self.game_over = False
+        self.victory = False
+        self.door_active = False
+        self.tutorial_door_active = False
+        self.door_frame_index = 0
+        self.door_animation_timer = 0.0
+        self.level_banner_timer = 2.5
+        self.wave_banner_timer = 2.0
+        self.wave_banner_text = ""
+
+        if full or not hasattr(self, "player") or self.player is None:
+            if hasattr(self, "player_visual") and self.player_visual:
+                self.player_visual.play("站", loop=True, force=True)
+            self.player = Player(getattr(self, "player_visual", None))
+        else:
+            p = self.player
+            if p.hp <= 0:
+                p.hp = p.max_hp
+                p.mp = p.max_mp
+            else:
+                p.hp = min(p.max_hp, p.hp + p.max_hp // 2)
+                p.mp = min(p.max_mp, p.mp + p.max_mp // 2)
+            p.rect.x = 140
+            p.rect.bottom = GROUND_Y
+            p.x = 140.0
+            p.y = float(p.rect.y)
+            p.vx = 0.0
+            p.vy = 0.0
+            p.invincible = 0.0
+            p.attack_active = False
+            p.attack_timer = 0.0
+            p.hurt_timer = 0.0
+            if p.visual:
+                p.visual.play("站", loop=True, force=True)
+
         self.spawn_wave()
 
     def spawn_wave(self):
         self.wave += 1
-        count = 3 + self.wave
-        for i in range(count):
-            x = 550 + i * 220 + random.randint(-35, 35)
-            kind = 1 if self.wave >= 2 and i == count - 1 else 0
-            self.enemies.append(Enemy(min(x, WORLD_WIDTH - 100), kind))
+        self.wave_banner_timer = 2.2
+        if getattr(self, "current_level", 1) == 888:
+            if self.wave == 1:
+                self.wave_banner_text = "【教学 1/4 · 基础攻击】按 [A] [D] 移动，按 [K] 跳跃，按 [J] 连续普攻！"
+                self.enemies.append(
+                    Enemy(650, kind=0, name="教学怪1 (基础木桩)", max_hp=45, speed=20, attack_damage=2)
+                )
+            elif self.wave == 2:
+                self.wave_banner_text = "【教学 2/4 · 技能浮空】按 [W + J] 升龙挑起，按 [S + J] 下劈重扣！"
+                self.enemies.append(
+                    Enemy(650, kind=0, name="教学怪2 (浮空木桩)", max_hp=55, speed=20, attack_damage=3)
+                )
+            elif self.wave == 3:
+                self.wave_banner_text = "【教学 3/4 · 冲刺与切武器】双击方向冲斩；按 [L] 切换主副手武器！"
+                self.enemies.append(
+                    Enemy(650, kind=1, name="教学怪3 (敏捷靶怪)", max_hp=70, speed=32, attack_damage=4)
+                )
+            else:
+                self.wave_banner_text = "【教学 4/4 · 毕业考核】综合运用全部连招，击破终极试炼靶怪！"
+                self.enemies.append(
+                    Enemy(700, kind=2, name="教学怪4 (终极傀儡)", max_hp=100, speed=36, attack_damage=5)
+                )
+        elif getattr(self, "current_level", 1) == 1:
+            if self.wave == 1:
+                self.wave_banner_text = "第 1 波：潜伏的前哨怪！"
+                for i in range(3):
+                    x = 600 + i * 260 + random.randint(-30, 30)
+                    m_hp = 1000000 if i == 0 else 45
+                    m_name = "幽林前哨 (100万血木桩)" if i == 0 else "幽林前哨"
+                    self.enemies.append(
+                        Enemy(min(x, WORLD_WIDTH - 150), kind=0, name=m_name, max_hp=m_hp, speed=75, attack_damage=8)
+                    )
+            elif self.wave == 2:
+                self.wave_banner_text = "第 2 波：精锐巡逻队！"
+                for i in range(3):
+                    x = 550 + i * 220 + random.randint(-25, 25)
+                    self.enemies.append(
+                        Enemy(min(x, WORLD_WIDTH - 200), kind=0, name="幽林前哨", max_hp=50, speed=80, attack_damage=9)
+                    )
+                self.enemies.append(
+                    Enemy(1300, kind=1, name="重装守卫", max_hp=110, speed=56, attack_damage=14)
+                )
+            else:
+                self.wave_banner_text = "警告：关卡首领【双头狂暴巨蜥】出现！"
+                self.enemies.append(
+                    Enemy(600, kind=0, name="幽林护卫", max_hp=55, speed=80, attack_damage=9)
+                )
+                self.enemies.append(
+                    Enemy(850, kind=0, name="幽林护卫", max_hp=55, speed=80, attack_damage=9)
+                )
+                self.enemies.append(
+                    Enemy(1050, kind=1, name="狂化先锋", max_hp=120, speed=60, attack_damage=15)
+                )
+                self.enemies.append(
+                    Enemy(1350, kind=2, name=STAGES[1].boss, max_hp=300, speed=68, attack_damage=18)
+                )
+        else:
+            if self.wave == 1:
+                self.wave_banner_text = "第 2 关 · 第 1 波：烈焰精锐部队！"
+                for i in range(4):
+                    x = 550 + i * 240 + random.randint(-20, 20)
+                    kind = 1 if i == 3 else 0
+                    self.enemies.append(
+                        Enemy(
+                            min(x, WORLD_WIDTH - 150),
+                            kind=kind,
+                            name="烈焰斥候" if kind == 0 else "炽热巨蜥",
+                            max_hp=65 if kind == 0 else 130,
+                            speed=88 if kind == 0 else 60,
+                            attack_damage=12 if kind == 0 else 16,
+                        )
+                    )
+            elif self.wave == 2:
+                self.wave_banner_text = "第 2 波：圣殿重装军团！"
+                self.enemies.append(
+                    Enemy(550, kind=0, name="烈焰狂信徒", max_hp=70, speed=90, attack_damage=13)
+                )
+                self.enemies.append(
+                    Enemy(800, kind=1, name="熔岩铁卫", max_hp=140, speed=62, attack_damage=18)
+                )
+                self.enemies.append(
+                    Enemy(1050, kind=1, name="熔岩铁卫", max_hp=140, speed=62, attack_damage=18)
+                )
+                self.enemies.append(
+                    Enemy(1300, kind=0, name="烈焰狂信徒", max_hp=70, speed=90, attack_damage=13)
+                )
+            else:
+                self.wave_banner_text = "极度危险：关底魔王【烈焰暴君 · 龙魔使】降临！"
+                self.enemies.append(
+                    Enemy(650, kind=1, name="龙血禁卫", max_hp=150, speed=65, attack_damage=18)
+                )
+                self.enemies.append(
+                    Enemy(900, kind=1, name="龙血禁卫", max_hp=150, speed=65, attack_damage=18)
+                )
+                self.enemies.append(
+                    Enemy(1250, kind=2, name=STAGES[2].boss, max_hp=580, speed=84, attack_damage=25)
+                )
 
     def handle_key(self, key):
         if key == pygame.K_F3:
             self.show_hitboxes = not self.show_hitboxes
             return
-        p = self.player
+
+        current_state = getattr(self, "game_state", "PLAYING")
+        if current_state == "OPENING" and getattr(self, "opening_cutscene", None):
+            self.opening_cutscene.handle_key(key)
+            return
+        if current_state == "WEAPON_SELECT" and getattr(self, "weapon_screen", None):
+            self.weapon_screen.handle_key(key)
+            return
+        if current_state == "PLAYING" and getattr(self, "current_level", 1) == 888:
+            if key in (pygame.K_p, pygame.K_ESCAPE):
+                self.finish_tutorial()
+                return
+            if getattr(self, "tutorial_door_active", False):
+                p = getattr(self, "player", None)
+                door_rect = pygame.Rect(1468 - 46, GROUND_Y - 261, 93, 261)
+                if p and (abs(p.rect.centerx - 1468) <= 70 or p.rect.colliderect(door_rect)):
+                    if key in (pygame.K_w, pygame.K_UP):
+                        self.finish_tutorial()
+                        return
+
+        if current_state == "LOBBY" and hasattr(self, "lobby"):
+            res = self.lobby.handle_event(pygame.event.Event(pygame.KEYDOWN, key=key))
+            if isinstance(res, tuple) and res[0] == "start_stage":
+                self.start_level(res[1])
+            elif res == "pause_menu":
+                self.game_state = "PAUSED"
+            elif key in Player.LEFT_KEYS + Player.RIGHT_KEYS:
+                p = getattr(self, "player", None)
+                if p:
+                    p.direction_key_down(key, pygame.time.get_ticks() / 1000.0)
+            elif key == pygame.K_k:
+                p = getattr(self, "player", None)
+                if p:
+                    p.jump()
+            return
+
+        if current_state == "PAUSED":
+            if key in (pygame.K_ESCAPE, pygame.K_1):
+                self.game_state = "PLAYING"
+            elif key in (pygame.K_r, pygame.K_2):
+                self.reset(level=self.current_level)
+                self.game_state = "PLAYING"
+            elif key in (pygame.K_t, pygame.K_l):
+                self.enter_lobby()
+            elif key in (pygame.K_m, pygame.K_3, pygame.K_BACKSPACE):
+                self.game_state = "START_SCREEN"
+            return
+
+        if current_state == "LEVEL_CLEAR":
+            if key in (pygame.K_j, pygame.K_SPACE, pygame.K_RETURN):
+                self.start_level(2)
+            return
+
+        if current_state == "VICTORY":
+            if key == pygame.K_r:
+                self.start_game(self.current_slot, self.starting_level)
+            elif key in (pygame.K_t, pygame.K_SPACE, pygame.K_RETURN):
+                self.enter_lobby()
+            elif key == pygame.K_ESCAPE:
+                self.game_state = "START_SCREEN"
+            return
+
+        if current_state == "GAME_OVER":
+            if key == pygame.K_r:
+                self.reset(level=self.current_level)
+                self.game_state = "PLAYING"
+            elif key in (pygame.K_t, pygame.K_SPACE, pygame.K_RETURN):
+                self.enter_lobby()
+            elif key == pygame.K_ESCAPE:
+                self.game_state = "START_SCREEN"
+            return
+
+        if current_state == "PLAYING" and key == pygame.K_ESCAPE:
+            self.game_state = "PAUSED"
+            return
+
+        p = getattr(self, "player", None)
+        if not p:
+            return
+
         if self.game_over or self.victory:
             if key == pygame.K_r:
                 self.reset()
@@ -1204,6 +1818,8 @@ class Game:
         elif key in (pygame.K_j, pygame.K_z):
             if p.attack(pygame.key.get_pressed()) and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
+            if hasattr(self, "sound_manager"):
+                self.sound_manager.play("swing")
         elif key in (pygame.K_h, pygame.K_1):
             if p.attack(requested_kind="skill1") and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
@@ -1216,14 +1832,66 @@ class Game:
         elif key in (pygame.K_o, pygame.K_4):
             if p.attack(requested_kind="skill4") and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
+            if hasattr(self, "sound_manager"):
+                self.sound_manager.play("skill4")
         elif key in (pygame.K_l, pygame.K_v) and p.visual:
-            p.visual.cycle_weapon()
+            if hasattr(self, "onboarding_weapons") and self.onboarding_weapons:
+                self.current_weapon_hand = 1 - getattr(self, "current_weapon_hand", 0)
+                self._apply_onboarding_weapon(use_secondary=(self.current_weapon_hand == 1))
+                w_id = self.onboarding_weapons[self.current_weapon_hand]
+                hand_str = "副手" if self.current_weapon_hand == 1 else "主手"
+                self.wave_banner_text = f"切换武器至 {hand_str}：【{WEAPON_NAMES.get(w_id, '巨剑')}】"
+                self.wave_banner_timer = 1.4
+            else:
+                p.visual.cycle_weapon()
         elif key == pygame.K_c and p.visual:
             p.visual.cycle_costume()
 
     def update(self, dt):
+        current_state = getattr(self, "game_state", "PLAYING")
+        if current_state == "OPENING" and getattr(self, "opening_cutscene", None):
+            self.opening_cutscene.update(dt)
+            return
+
+        if current_state == "LOBBY" and hasattr(self, "lobby"):
+            keys = pygame.key.get_pressed()
+            res = self.lobby.update(dt, keys)
+            if isinstance(res, tuple) and res[0] == "start_stage":
+                self.start_level(res[1])
+            return
+
+        if current_state in ("START_SCREEN", "WEAPON_SELECT", "PAUSED", "GAME_OVER", "VICTORY"):
+            if current_state == "START_SCREEN" and hasattr(self, "start_screen"):
+                self.start_screen.update(dt)
+            elif current_state == "WEAPON_SELECT" and getattr(self, "weapon_screen", None):
+                self.weapon_screen.update(dt)
+            return
+
+        if current_state == "LEVEL_CLEAR":
+            if self.door_active and self.door_frames:
+                self.door_animation_timer += dt
+                if self.door_animation_timer >= 0.08:
+                    self.door_animation_timer = 0.0
+                    self.door_frame_index = (self.door_frame_index + 1) % len(self.door_frames)
+            p = getattr(self, "player", None)
+            if p:
+                keys = pygame.key.get_pressed()
+                p.update(dt, keys)
+                door_rect = pygame.Rect(2400, GROUND_Y - 277, 109, 277)
+                if p.rect.colliderect(door_rect):
+                    self.start_level(2)
+            return
+
         if self.game_over or self.victory:
             return
+
+        self.level_banner_timer = max(0.0, self.level_banner_timer - dt)
+        self.wave_banner_timer = max(0.0, self.wave_banner_timer - dt)
+        if getattr(self, "shake_timer", 0.0) > 0:
+            self.shake_timer = max(0.0, self.shake_timer - dt)
+            if self.shake_timer == 0:
+                self.shake_intensity = 0
+
         p = self.player
         keys = pygame.key.get_pressed()
         p.update(dt, keys)
@@ -1240,9 +1908,12 @@ class Game:
         self.bolts = [b for b in self.bolts if b.life > 0]
         defeated = [e for e in self.enemies if e.hp <= 0]
         if defeated:
-            for _ in defeated:
-                p.score += 100
-                p.xp += 25
+            for enemy in defeated:
+                self.total_kills += 1
+                xp_gain = 50 if getattr(enemy, "kind", 0) == 2 else (35 if getattr(enemy, "kind", 0) == 1 else 25)
+                score_gain = 500 if getattr(enemy, "kind", 0) == 2 else (200 if getattr(enemy, "kind", 0) == 1 else 100)
+                p.score += score_gain
+                p.xp += xp_gain
                 p.mp = min(p.max_mp, p.mp + 5)
                 if p.xp >= p.level * 100:
                     p.xp -= p.level * 100
@@ -1252,21 +1923,60 @@ class Game:
             self.enemies = [e for e in self.enemies if e.hp > 0]
         if p.hp <= 0:
             self.game_over = True
+            self.game_state = "GAME_OVER"
         if not self.enemies:
             self.wave_pause += dt
-            if self.wave >= 3:
-                self.victory = True
-            elif self.wave_pause > 1.5:
+            if getattr(self, "current_level", 1) == 888:
+                if self.wave >= 4:
+                    if not getattr(self, "tutorial_door_active", False):
+                        self.tutorial_door_active = True
+                        self.wave_banner_text = "【试炼通关】前往右侧传送阵 (坐标 1468)，按 [W] 传送回村！"
+                        self.wave_banner_timer = 5.0
+                elif self.wave_pause > 1.2:
+                    self.wave_pause = 0
+                    self.spawn_wave()
+            elif self.wave >= 3:
+                if self.current_level == 1:
+                    self.game_state = "LEVEL_CLEAR"
+                    self.door_active = True
+                    if hasattr(self, "start_screen"):
+                        entries = list(self.start_screen.save_entries)
+                        entries[self.current_slot - 1] = f"槽位 {self.current_slot}: Lv.{p.level} 剑士\n突破第1关 (得分 {p.score})"
+                        self.start_screen.set_save_entries(entries)
+                else:
+                    self.victory = True
+                    self.game_state = "VICTORY"
+                    if hasattr(self, "start_screen"):
+                        entries = list(self.start_screen.save_entries)
+                        result = "已全通关！" if self.starting_level == 1 else "突破第2关"
+                        entries[self.current_slot - 1] = f"槽位 {self.current_slot}: Lv.{p.level} 剑士\n{result} (得分 {p.score})"
+                        self.start_screen.set_save_entries(entries)
+            elif self.wave_pause > 1.4:
                 self.wave_pause = 0
                 self.spawn_wave()
 
+        if getattr(self, "current_level", 1) == 888 and getattr(self, "tutorial_door_active", False):
+            if self.door_frames:
+                self.door_animation_timer += dt
+                if self.door_animation_timer >= 0.08:
+                    self.door_animation_timer = 0.0
+                    self.door_frame_index = (self.door_frame_index + 1) % len(self.door_frames)
+            door_rect = pygame.Rect(1468 - 46, GROUND_Y - 261, 93, 261)
+            if abs(p.rect.centerx - 1468) <= 70 or p.rect.colliderect(door_rect):
+                if keys[pygame.K_w] or keys[pygame.K_UP]:
+                    self.finish_tutorial()
+                    return
+
     @staticmethod
     def current_player_attack_boxes(p):
+        facing = getattr(p, "attack_facing", p.facing) if p.attack_active else p.facing
         if p.visual and p.visual.available:
             if not p.visual.one_shot:
                 return []
-            return p.visual.hitboxes_at(p.rect.centerx, p.rect.bottom, p.facing)
+            return p.visual.hitboxes_at(p.rect.centerx, p.rect.bottom, facing)
         if p.attack_timer <= 0:
+            return []
+        if p.current_attack_run and p.attack_timer > 0.14:
             return []
         return [p.attack_box(p.current_attack_run, p.last_attack_kind)]
 
@@ -1304,6 +2014,72 @@ class Game:
         for label, color in entries:
             self.screen.blit(self.font.render(label, True, color), (x, y))
             x += self.font.size(label)[0] + 12
+
+    def _draw_hitbox_pill(self):
+        mpos = pygame.mouse.get_pos()
+        hovered = self.hitbox_pill_rect.collidepoint(mpos)
+        is_on = self.show_hitboxes
+        bg_col = (20, 50, 75, 230) if is_on else ((45, 38, 42, 220) if hovered else (28, 22, 26, 190))
+        border_col = (0, 235, 255) if is_on else ((240, 210, 110) if hovered else (140, 120, 105))
+        pill_surf = pygame.Surface(self.hitbox_pill_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(pill_surf, bg_col, pill_surf.get_rect(), border_radius=8)
+        pygame.draw.rect(pill_surf, border_col, pill_surf.get_rect(), 2 if (is_on or hovered) else 1, border_radius=8)
+        txt = "[F3] 按钮选区: 开" if is_on else "[F3] 按钮选区: 关"
+        col = (100, 245, 255) if is_on else ((255, 230, 150) if hovered else (185, 175, 165))
+        font = getattr(self, "pill_font", self.font)
+        ts = font.render(txt, True, col)
+        pill_surf.blit(ts, ts.get_rect(center=(self.hitbox_pill_rect.width // 2, self.hitbox_pill_rect.height // 2)))
+        self.screen.blit(pill_surf, self.hitbox_pill_rect.topleft)
+
+    def draw_ui_hitboxes_overlay(self, surface: pygame.Surface, hitboxes: dict[str, pygame.Rect], mpos: tuple[int, int] | None):
+        if not self.show_hitboxes or not hitboxes:
+            return
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        tag_font = getattr(self, "small_font", self.font)
+
+        for name, rect in hitboxes.items():
+            if not isinstance(rect, pygame.Rect) or rect.width <= 0 or rect.height <= 0:
+                continue
+            is_hovered = mpos is not None and rect.collidepoint(mpos)
+            fill_col = (255, 190, 40, 50) if is_hovered else (0, 190, 255, 30)
+            border_col = (255, 215, 60, 240) if is_hovered else (0, 220, 255, 220)
+
+            pygame.draw.rect(overlay, fill_col, rect)
+            pygame.draw.rect(overlay, border_col, rect, 2)
+
+            cl = min(8, rect.width // 4, rect.height // 4)
+            if cl > 2:
+                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.left, rect.top), (rect.left + cl, rect.top), 2)
+                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.left, rect.top), (rect.left, rect.top + cl), 2)
+                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.right - 1, rect.bottom - 1), (rect.right - 1 - cl, rect.bottom - 1), 2)
+                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.right - 1, rect.bottom - 1), (rect.right - 1, rect.bottom - 1 - cl), 2)
+
+            tag = f"[{name}: {rect.width}x{rect.height}]" + (" ★" if is_hovered else "")
+            tag_surf = tag_font.render(tag, True, (255, 240, 180) if is_hovered else (200, 240, 255))
+
+            if tag_surf.get_width() > rect.width and rect.width > 30:
+                scale_f = min(1.0, max(0.65, (rect.width + 20) / tag_surf.get_width()))
+                if scale_f < 0.95:
+                    tag_surf = pygame.transform.smoothscale(
+                        tag_surf, (round(tag_surf.get_width() * scale_f), round(tag_surf.get_height() * scale_f))
+                    )
+
+            # Position tag above the box to avoid obscuring inside text/graphics
+            th = tag_surf.get_height()
+            if rect.top >= th + 4:
+                ty = rect.top - th - 2
+            elif rect.bottom + th + 4 <= surface.get_height():
+                ty = rect.bottom + 2
+            else:
+                ty = rect.top + 2
+            tx = max(2, min(surface.get_width() - tag_surf.get_width() - 4, rect.left))
+
+            bg_tag = pygame.Rect(tx, ty, tag_surf.get_width() + 4, tag_surf.get_height() + 2)
+            pygame.draw.rect(overlay, (12, 16, 24, 230), bg_tag, border_radius=3)
+            pygame.draw.rect(overlay, border_col, bg_tag, 1, border_radius=3)
+            overlay.blit(tag_surf, (tx + 2, ty + 1))
+
+        surface.blit(overlay, (0, 0))
 
     def resolve_player_attack(self):
         p = self.player
@@ -1353,12 +2129,16 @@ class Game:
         bonus_knockback = int(numeric_value(skill_values.get("震退", 0)))
         bonus_launch = int(numeric_value(skill_values.get("挑高", 0)))
         bonus_duration = int(numeric_value(skill_values.get("持续", 0)))
-        attacker_hardstun = int(
-            frame_data.get("hardstun", FALLBACK_ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10))
-        ) + bonus_hardstun
+        raw_hardstun = frame_data.get("hardstun")
+        if raw_hardstun is None or int(numeric_value(raw_hardstun, 0)) <= 0:
+            fallback_hardstun = FALLBACK_ATTACK_HITSTUN_FRAMES.get(p.last_attack_kind, 10)
+            attacker_hardstun = fallback_hardstun + bonus_hardstun
+        else:
+            attacker_hardstun = int(raw_hardstun) + bonus_hardstun
+        if attacker_hardstun <= 0:
+            attacker_hardstun = 120
+        did_connect = False
         for enemy in self.enemies:
-            if p.last_attack_kind == "skill2" and not enemy.airborne:
-                continue
             if is_skill and p.visual and p.visual.available:
                 hit_groups = p.skill_hit_targets.setdefault(enemy, set())
                 can_hit = hit_group is not None and hit_group not in hit_groups
@@ -1370,19 +2150,37 @@ class Game:
                     attacker_hardstun - enemy.stun_resistance_frames,
                 )
                 stun_duration = stun_frames / ANIMATION_FPS
+                launch_val = int(numeric_value(frame_damage.get("launch", 0))) + bonus_launch
+                duration_val = int(numeric_value(frame_damage.get("duration", 0))) + bonus_duration
+                knockback_val = int(numeric_value(frame_damage.get("knockback", 0))) + bonus_knockback
+                if p.last_attack_kind == "skill2":
+                    if relative_frame <= 7 and not enemy.airborne:
+                        launch_val = 160
+                        duration_val = 1
+                    elif relative_frame >= 35:
+                        launch_val = -300
+                        if hasattr(self, "trigger_screen_shake"):
+                            self.trigger_screen_shake(0.2, 8)
+                        else:
+                            self.shake_timer = 0.2
+                    else:
+                        launch_val = 0
                 enemy.take_hit(
                     damage,
                     p.rect.centerx,
-                    launch_speed=int(numeric_value(frame_damage.get("launch", 0))) + bonus_launch,
+                    launch_speed=launch_val,
                     stun_duration=stun_duration,
-                    knockback=int(numeric_value(frame_damage.get("knockback", 0))) + bonus_knockback,
-                    motion_duration=int(numeric_value(frame_damage.get("duration", 0))) + bonus_duration,
+                    knockback=knockback_val,
+                    motion_duration=duration_val,
                     attacker_facing=p.facing,
                 )
+                did_connect = True
                 if is_skill and p.visual and p.visual.available:
                     hit_groups.add(hit_group)
                 else:
                     p.attack_targets.add(enemy)
+        if did_connect and hasattr(self, "sound_manager"):
+            self.sound_manager.play("hit")
 
     def resolve_enemy_attacks(self):
         player_hitbox = self.player.hitbox()
@@ -1394,29 +2192,50 @@ class Game:
                 and hitbox.colliderect(player_hitbox)
             ):
                 enemy.attack_did_hit = True
-                self.player.take_hit(8 if enemy.kind == 0 else 13, enemy.rect.centerx)
+                dmg = getattr(enemy, "attack_damage", (8 if enemy.kind == 0 else 13))
+                self.player.take_hit(dmg, enemy.rect.centerx)
 
     def draw_background(self, camera):
-        self.screen.fill(SKY)
-        for i in range(7):
-            x = (i * 190 - int(camera * 0.22)) % (WIDTH + 220) - 110
-            pygame.draw.circle(self.screen, (29, 43, 72), (x, 170 + (i % 3) * 22), 100)
-        for i in range(-1, 20):
-            x = i * 150 - int(camera * 0.45) % 150
-            pygame.draw.polygon(self.screen, (37, 55, 78), [(x, GROUND_Y), (x + 95, 280), (x + 180, GROUND_Y)])
-        pygame.draw.rect(self.screen, (37, 42, 55), (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
-        pygame.draw.rect(self.screen, (75, 113, 79), (0, GROUND_Y, WIDTH, 9))
-        for x in range(-int(camera) % 56, WIDTH, 56):
-            pygame.draw.line(self.screen, (48, 55, 65), (x, GROUND_Y + 20), (x - 24, HEIGHT), 2)
+        lvl = getattr(self, "current_level", 1)
+        bg = getattr(self, "bg_surfaces", {}).get(lvl)
+        if bg is not None:
+            bg_w = bg.get_width()
+            max_cam = max(1, WORLD_WIDTH - WIDTH)
+            max_bg_offset = max(0, bg_w - WIDTH)
+            bg_x = -round(camera * max_bg_offset / max_cam)
+            self.screen.blit(bg, (bg_x, 0))
+            g_col = (37, 42, 55) if lvl == 1 else (45, 25, 22)
+            top_line_col = (75, 113, 79) if lvl == 1 else (180, 70, 40)
+            pygame.draw.rect(self.screen, g_col, (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
+            pygame.draw.rect(self.screen, top_line_col, (0, GROUND_Y, WIDTH, 8))
+            for x in range(-int(camera) % 56, WIDTH, 56):
+                pygame.draw.line(self.screen, (g_col[0] + 12, g_col[1] + 12, g_col[2] + 12), (x, GROUND_Y + 16), (x - 24, HEIGHT), 2)
+        else:
+            sky_col = SKY if lvl == 1 else (42, 18, 16)
+            self.screen.fill(sky_col)
+            for i in range(7):
+                x = (i * 190 - int(camera * 0.22)) % (WIDTH + 220) - 110
+                hill_col = (29, 43, 72) if lvl == 1 else (65, 28, 25)
+                pygame.draw.circle(self.screen, hill_col, (x, 170 + (i % 3) * 22), 100)
+            for i in range(-1, 20):
+                x = i * 150 - int(camera * 0.45) % 150
+                poly_col = (37, 55, 78) if lvl == 1 else (80, 35, 30)
+                pygame.draw.polygon(self.screen, poly_col, [(x, GROUND_Y), (x + 95, 280), (x + 180, GROUND_Y)])
+            g_col = (37, 42, 55) if lvl == 1 else (45, 25, 22)
+            pygame.draw.rect(self.screen, g_col, (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
+            top_line_col = (75, 113, 79) if lvl == 1 else (180, 70, 40)
+            pygame.draw.rect(self.screen, top_line_col, (0, GROUND_Y, WIDTH, 9))
+            for x in range(-int(camera) % 56, WIDTH, 56):
+                pygame.draw.line(self.screen, (g_col[0] + 12, g_col[1] + 12, g_col[2] + 12), (x, GROUND_Y + 20), (x - 24, HEIGHT), 2)
 
     def draw_player(self, p, camera):
-        if p.visual and p.visual.draw(self.screen, p.rect.centerx - camera, p.rect.bottom, p.facing):
+        facing = getattr(p, "attack_facing", p.facing) if p.attack_active else p.facing
+        if p.visual and p.visual.draw(self.screen, p.rect.centerx - camera, p.rect.bottom, facing):
             return
         x = round(p.rect.x - camera)
         y = p.rect.y
         if p.invincible > 0 and int(p.invincible * 18) % 2 == 0:
             return
-        # Simple original placeholder art, drawn in code until the SWF animation mapping is recovered.
         pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 7, 58, 14))
         pygame.draw.rect(self.screen, (48, 75, 151), (x + 5, y + 27, 32, 37), border_radius=8)
         pygame.draw.polygon(self.screen, (184, 207, 255), [(x + 9, y + 26), (x + 22, y + 6), (x + 35, y + 26)])
@@ -1439,37 +2258,186 @@ class Game:
         self.screen.blit(self.font.render(label, True, WHITE), (x + width + 8, y - 5))
 
     def draw(self):
+        current_state = getattr(self, "game_state", "PLAYING")
+        if current_state == "START_SCREEN" and hasattr(self, "start_screen"):
+            canvas = self.start_screen.draw()
+            if self.show_hitboxes:
+                self.draw_ui_hitboxes_overlay(canvas, self.start_screen.hitboxes, self.mouse_stage_pos)
+            self._render_stage_canvas(canvas)
+            return
+        if current_state == "OPENING" and getattr(self, "opening_cutscene", None):
+            canvas = self.opening_cutscene.draw(self.mouse_stage_pos)
+            if self.show_hitboxes:
+                self.draw_ui_hitboxes_overlay(canvas, self.opening_cutscene.hitboxes, self.mouse_stage_pos)
+            self._render_stage_canvas(canvas)
+            return
+        if current_state == "WEAPON_SELECT" and getattr(self, "weapon_screen", None):
+            canvas = self.weapon_screen.draw(self.mouse_stage_pos)
+            if self.show_hitboxes:
+                self.draw_ui_hitboxes_overlay(canvas, self.weapon_screen.hitboxes, self.mouse_stage_pos)
+            self._render_stage_canvas(canvas)
+            return
+        if current_state == "LOBBY" and hasattr(self, "lobby"):
+            self.lobby.draw(self.screen, draw_player_fn=lambda cam: self.draw_player(self.player, cam))
+            if self.show_hitboxes:
+                self.draw_ui_hitboxes_overlay(self.screen, self.lobby.hitboxes, pygame.mouse.get_pos())
+            self._draw_hitbox_pill()
+            pygame.display.flip()
+            return
+
+        self.menu_hitboxes.clear()
+
         p = self.player
         camera = clamp(p.rect.centerx - WIDTH // 2, 0, WORLD_WIDTH - WIDTH)
         self.draw_background(camera)
-        # Small distant ruins add landmarks as the camera moves through the stage.
-        for landmark in (400, 1150, 1950, 2450):
-            x = round(landmark - camera)
-            if -100 < x < WIDTH + 100:
-                pygame.draw.rect(self.screen, (65, 69, 82), (x, GROUND_Y - 95, 48, 95))
-                pygame.draw.polygon(self.screen, (91, 81, 90), [(x - 12, GROUND_Y - 95), (x + 24, GROUND_Y - 125), (x + 58, GROUND_Y - 95)])
+
+        if getattr(self, "current_level", 1) != 888:
+            for landmark in (400, 1150, 1950, 2450):
+                x = round(landmark - camera)
+                if -100 < x < WIDTH + 100:
+                    pygame.draw.rect(self.screen, (65, 69, 82), (x, GROUND_Y - 95, 48, 95))
+                    pygame.draw.polygon(
+                        self.screen, (91, 81, 90), [(x - 12, GROUND_Y - 95), (x + 24, GROUND_Y - 125), (x + 58, GROUND_Y - 95)]
+                    )
+
+        if getattr(self, "door_active", False) and getattr(self, "door_frames", None):
+            door_img = self.door_frames[self.door_frame_index % len(self.door_frames)]
+            door_x = 2400
+            door_y = GROUND_Y - door_img.get_height()
+            screen_door_x = round(door_x - camera)
+            if -200 < screen_door_x < WIDTH + 200:
+                glow_val = int(128 + 100 * math.sin(pygame.time.get_ticks() / 250.0))
+                glow_surf = pygame.Surface((door_img.get_width() + 40, door_img.get_height() + 40), pygame.SRCALPHA)
+                pygame.draw.ellipse(glow_surf, (100, 200, 255, max(0, min(255, glow_val // 3))), glow_surf.get_rect())
+                self.screen.blit(glow_surf, (screen_door_x - 20, door_y - 20))
+                self.screen.blit(door_img, (screen_door_x, door_y))
+                door_txt = self.font.render("▼ 传送阵 (靠近或按 J 进入第2关)", True, (180, 240, 255))
+                self.screen.blit(door_txt, door_txt.get_rect(center=(screen_door_x + door_img.get_width() // 2, door_y - 18)))
+
+        if (
+            getattr(self, "current_level", 1) == 888
+            and getattr(self, "tutorial_door_active", False)
+            and getattr(self, "door_frames", None)
+        ):
+            door_img = self.door_frames[self.door_frame_index % len(self.door_frames)]
+            door_x = 1468
+            door_y = GROUND_Y - door_img.get_height()
+            screen_door_x = round(door_x - camera - door_img.get_width() // 2)
+            if -200 < screen_door_x < WIDTH + 200:
+                glow_val = int(128 + 100 * math.sin(pygame.time.get_ticks() / 250.0))
+                glow_surf = pygame.Surface((door_img.get_width() + 40, door_img.get_height() + 40), pygame.SRCALPHA)
+                pygame.draw.ellipse(glow_surf, (100, 255, 180, max(0, min(255, glow_val // 3))), glow_surf.get_rect())
+                self.screen.blit(glow_surf, (screen_door_x - 20, door_y - 20))
+                self.screen.blit(door_img, (screen_door_x, door_y))
+                is_near = abs(p.rect.centerx - 1468) <= 80
+                if is_near:
+                    prompt_rect = pygame.Rect(screen_door_x - 18, door_y - 36, door_img.get_width() + 36, 28)
+                    pygame.draw.rect(self.screen, (24, 38, 28, 230), prompt_rect, border_radius=6)
+                    pygame.draw.rect(self.screen, (100, 255, 160), prompt_rect, 2, border_radius=6)
+                    p_txt = self.font.render("按 [W] 传送回村", True, (200, 255, 210))
+                    self.screen.blit(p_txt, p_txt.get_rect(center=prompt_rect.center))
+                else:
+                    door_txt = self.font.render("▼ 传送阵 · 按 [W]", True, (160, 240, 190))
+                    self.screen.blit(door_txt, door_txt.get_rect(center=(screen_door_x + door_img.get_width() // 2, door_y - 18)))
+
         for enemy in self.enemies:
             x, y = round(enemy.rect.x - camera), enemy.rect.y
-            color = (255, 220, 215) if enemy.flash else ((172, 75, 71) if enemy.kind == 0 else (109, 63, 135))
-            pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 6, enemy.w + 16, 12))
-            pygame.draw.rect(self.screen, color, (x, y + 12, enemy.w, enemy.h - 12), border_radius=12)
-            pygame.draw.circle(self.screen, (221, 190, 152), (x + enemy.w // 2, y + 13), 14 if enemy.kind == 0 else 18)
-            eye = x + enemy.w // 2 + enemy.facing * 5
-            pygame.draw.circle(self.screen, (255, 226, 119), (eye, y + 13), 3)
-            pygame.draw.rect(self.screen, (36, 25, 33), (x, y - 8, enemy.w, 5), border_radius=2)
-            pygame.draw.rect(self.screen, (209, 69, 75), (x, y - 8, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 5), border_radius=2)
+            dummy_id = None
+            if enemy.name.startswith("教学怪"):
+                for did in (1, 2, 3, 4):
+                    if str(did) in enemy.name:
+                        dummy_id = did
+                        break
+            if dummy_id and dummy_id in getattr(self, "dummy_frames", {}):
+                frame_img = self.dummy_frames[dummy_id]
+                scaled_dummy = frame_img
+                if enemy.facing > 0:
+                    scaled_dummy = pygame.transform.flip(scaled_dummy, True, False)
+                dw, dh = scaled_dummy.get_size()
+                pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 6, enemy.w + 16, 12))
+                dx = round(enemy.rect.centerx - camera - dw // 2)
+                dy = GROUND_Y - dh
+                self.screen.blit(scaled_dummy, (dx, dy))
+                if enemy.flash > 0:
+                    flash_surf = pygame.Surface((dw, dh), pygame.SRCALPHA)
+                    flash_surf.fill((255, 255, 255, 130))
+                    self.screen.blit(flash_surf, (dx, dy), special_flags=pygame.BLEND_RGBA_ADD)
+                pygame.draw.rect(self.screen, (36, 25, 33), (x, dy - 10, enemy.w, 5), border_radius=2)
+                pygame.draw.rect(self.screen, (225, 55, 55), (x, dy - 10, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 5), border_radius=2)
+                name_txt = self.font.render(enemy.name.split(" ")[0], True, (255, 220, 160))
+                self.screen.blit(name_txt, (x - 4, dy - 28))
+            elif enemy.kind == 2:
+                color = (255, 235, 230) if enemy.flash else ((195, 45, 45) if getattr(self, "current_level", 1) == 2 else (165, 55, 105))
+                pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 12, GROUND_Y - 8, enemy.w + 24, 16))
+                pygame.draw.rect(self.screen, color, (x, y + 16, enemy.w, enemy.h - 16), border_radius=14)
+                pygame.draw.polygon(self.screen, (245, 190, 50), [(x + 8, y + 16), (x + enemy.w // 2, y - 6), (x + enemy.w - 8, y + 16)])
+                pygame.draw.circle(self.screen, (235, 195, 150), (x + enemy.w // 2, y + 16), 22)
+                eye = x + enemy.w // 2 + enemy.facing * 8
+                pygame.draw.circle(self.screen, (255, 40, 40), (eye, y + 16), 4)
+                pygame.draw.rect(self.screen, (36, 25, 33), (x, y - 14, enemy.w, 6), border_radius=2)
+                pygame.draw.rect(self.screen, (225, 45, 45), (x, y - 14, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 6), border_radius=2)
+            else:
+                color = (255, 220, 215) if enemy.flash else ((172, 75, 71) if enemy.kind == 0 else (109, 63, 135))
+                pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 6, enemy.w + 16, 12))
+                pygame.draw.rect(self.screen, color, (x, y + 12, enemy.w, enemy.h - 12), border_radius=12)
+                pygame.draw.circle(self.screen, (221, 190, 152), (x + enemy.w // 2, y + 13), 14 if enemy.kind == 0 else 18)
+                eye = x + enemy.w // 2 + enemy.facing * 5
+                pygame.draw.circle(self.screen, (255, 226, 119), (eye, y + 13), 3)
+                pygame.draw.rect(self.screen, (36, 25, 33), (x, y - 8, enemy.w, 5), border_radius=2)
+                pygame.draw.rect(self.screen, (209, 69, 75), (x, y - 8, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 5), border_radius=2)
+
         self.draw_player(p, camera)
         for bolt in self.bolts:
             rect = bolt.rect.move(-round(camera), 0)
             pygame.draw.ellipse(self.screen, (255, 209, 105), rect.inflate(12, 8))
             pygame.draw.ellipse(self.screen, (255, 248, 205), rect)
         self.draw_hitbox_debug(camera)
-        self.draw_bar(22, 22, 190, p.hp, p.max_hp, (204, 65, 75), f"HP {p.hp}/{p.max_hp}")
-        self.draw_bar(22, 47, 190, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
-        self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
-        self.screen.blit(self.font.render(f"关卡 {self.wave}/3", True, WHITE), (WIDTH - 112, 22))
 
-        # Skill cooldown indicator badges
+        if getattr(self, "shake_timer", 0.0) > 0 and getattr(self, "shake_intensity", 0) > 0:
+            shake_y = -self.shake_intensity if (int(self.shake_timer * 30) % 2 == 0) else self.shake_intensity
+            self.screen.scroll(0, shake_y)
+
+        self.draw_bar(22, 22, 215, p.hp, p.max_hp, (204, 65, 75), f"HP {p.hp}/{p.max_hp}")
+        self.draw_bar(22, 47, 215, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
+        self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
+
+        lvl = getattr(self, "current_level", 1)
+        if lvl == 888:
+            lvl_txt = f"新手指导 · 第 {self.wave}/4 阶段"
+            bar_rect = pygame.Rect(WIDTH // 2 - 380, 8, 760, 52)
+            pygame.draw.rect(self.screen, (34, 22, 26), bar_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (225, 165, 75), bar_rect, 2, border_radius=8)
+            guide_texts = {
+                1: "【教学 1/4 · 基础攻击】按 [A] [D] 移动，按 [K] 跳跃，按 [J] 连续普攻！",
+                2: "【教学 2/4 · 技能浮空】按 [W + J] 升龙挑起，按 [S + J] 下劈震地！",
+                3: "【教学 3/4 · 冲刺与切武器】双击方向冲斩；按 [L] 切换主副手武器！",
+                4: "【教学 4/4 · 毕业考核】综合运用全部连招，击破终极试炼靶怪！",
+            }
+            gtxt = guide_texts.get(self.wave, "击破试炼木桩完成练习！")
+            ts = self.font.render(gtxt, True, (255, 230, 160))
+            self.screen.blit(ts, ts.get_rect(center=(WIDTH // 2, 22)))
+            skip_hint = self.font.render("按 [P] 或 [Esc] 跳过教学", True, (210, 200, 190))
+            self.screen.blit(skip_hint, skip_hint.get_rect(center=(WIDTH // 2, 44)))
+        else:
+            lvl_txt = f"关卡 {lvl}/2 · 第 {self.wave}/3 波"
+            self.screen.blit(self.ui_font.render(lvl_txt, True, (255, 235, 150)), (WIDTH - 330, 18))
+
+        boss = next((e for e in self.enemies if getattr(e, "kind", 0) == 2 and e.hp > 0), None)
+        if boss is not None:
+            bar_w, bar_h = 440, 20
+            bx, by = (WIDTH - bar_w) // 2, 24
+            pygame.draw.rect(self.screen, (20, 15, 25), (bx - 3, by - 3, bar_w + 6, bar_h + 6), border_radius=6)
+            pygame.draw.rect(self.screen, (55, 30, 35), (bx, by, bar_w, bar_h), border_radius=4)
+            b_fill = round(bar_w * max(0, boss.hp) / boss.max_hp)
+            if b_fill > 0:
+                b_col = (225, 60, 55) if lvl == 2 else (210, 60, 120)
+                pygame.draw.rect(self.screen, b_col, (bx, by, b_fill, bar_h), border_radius=4)
+                pygame.draw.rect(self.screen, (255, 160, 170), (bx, by + 2, b_fill, 4), border_radius=2)
+            pygame.draw.rect(self.screen, (240, 195, 80), (bx - 1, by - 1, bar_w + 2, bar_h + 2), 2, border_radius=4)
+            b_title = f"{boss.name}   HP {max(0, boss.hp)} / {boss.max_hp}"
+            b_txt_surf = self.ui_font.render(b_title, True, (255, 245, 220))
+            self.screen.blit(b_txt_surf, b_txt_surf.get_rect(center=(WIDTH // 2, by - 14)))
+
         skill_keys = [
             ("H", "魔光闪", "a8"),
             ("U", "断空追击", "a9"),
@@ -1487,17 +2455,155 @@ class Game:
                 col = (105, 235, 135)
             self.screen.blit(self.font.render(txt, True, col), (hud_skill_x + i * 95, 52))
 
-        controls = "双击 A/D 冲刺   J 攻击   K 跳跃   H/U/I/O 技能1-4   L 换剑   C 换装   F3 HITBOXES"
+        controls = "双击 A/D 冲刺   J 攻击   K 跳跃   H/U/I/O 技能1-4   L 换剑   C 换装   Esc 暂停   F3 HITBOXES"
         self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
-        if self.game_over or self.victory:
+
+        if getattr(self, "level_banner_timer", 0) > 0:
+            alpha = max(0, min(255, int(255 * (self.level_banner_timer / 0.5 if self.level_banner_timer < 0.5 else 1.0))))
+            banner_surf = pygame.Surface((WIDTH, 84), pygame.SRCALPHA)
+            banner_surf.fill((12, 16, 28, int(alpha * 0.85)))
+            stage_info = ALL_STAGES.get(lvl, TUTORIAL_STAGE)
+            level_name = f"新手指导 · {stage_info.name}" if lvl == 888 else f"第 {lvl} 关 · {stage_info.name}"
+            if lvl == 888:
+                sub = "完成教学指引，掌握战斗要领！"
+            elif lvl == 1:
+                sub = "消灭全部敌人，突破传送门！"
+            else:
+                sub = "迎战最终决战，击溃烈焰暴君！"
+            t1 = self.big_font.render(level_name, True, (255, 225, 90))
+            t2 = self.font.render(sub, True, (210, 230, 250))
+            t1.set_alpha(alpha)
+            t2.set_alpha(alpha)
+            banner_surf.blit(t1, t1.get_rect(center=(WIDTH // 2, 28)))
+            banner_surf.blit(t2, t2.get_rect(center=(WIDTH // 2, 62)))
+            self.screen.blit(banner_surf, (0, 130))
+        elif getattr(self, "wave_banner_timer", 0) > 0 and getattr(self, "wave_banner_text", ""):
+            alpha = max(0, min(255, int(255 * (self.wave_banner_timer / 0.4 if self.wave_banner_timer < 0.4 else 1.0))))
+            wave_surf = pygame.Surface((WIDTH, 44), pygame.SRCALPHA)
+            wave_surf.fill((20, 24, 38, int(alpha * 0.78)))
+            is_boss_wave = "首领" in self.wave_banner_text or "魔王" in self.wave_banner_text
+            col = (255, 100, 100) if is_boss_wave else (240, 230, 140)
+            txt = self.ui_font.render(self.wave_banner_text, True, col)
+            txt.set_alpha(alpha)
+            wave_surf.blit(txt, txt.get_rect(center=(WIDTH // 2, 22)))
+            self.screen.blit(wave_surf, (0, 150))
+
+        if current_state == "LEVEL_CLEAR":
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            veil.fill((7, 10, 19, 185))
+            veil.fill((10, 15, 30, 160))
             self.screen.blit(veil, (0, 0))
-            title = "挑战成功！" if self.victory else "你被击败了"
-            message = self.big_font.render(title, True, WHITE)
-            prompt = self.font.render(f"得分 {p.score}   按 R 重新开始", True, (205, 216, 231))
-            self.screen.blit(message, message.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 20)))
-            self.screen.blit(prompt, prompt.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 30)))
+            banner_rect = pygame.Rect((WIDTH - 580) // 2, (HEIGHT - 230) // 2, 580, 230)
+            pygame.draw.rect(self.screen, (22, 28, 48), banner_rect, border_radius=12)
+            pygame.draw.rect(self.screen, (240, 195, 60), banner_rect, 3, border_radius=12)
+            title = self.big_font.render("第 1 关 · 突破成功！", True, (255, 230, 120))
+            self.screen.blit(title, title.get_rect(center=(WIDTH // 2, banner_rect.top + 45)))
+            info1 = self.ui_font.render(f"累计击破：{self.total_kills}   当前等级：Lv.{p.level}   得分：{p.score}", True, WHITE)
+            self.screen.blit(info1, info1.get_rect(center=(WIDTH // 2, banner_rect.top + 98)))
+            reward = self.font.render("通关奖励：生命与魔法已恢复 50%", True, (110, 245, 140))
+            self.screen.blit(reward, reward.get_rect(center=(WIDTH // 2, banner_rect.top + 138)))
+
+            # Interactive button for advancing to next stage
+            btn_rect = pygame.Rect(banner_rect.centerx - 220, banner_rect.top + 168, 440, 38)
+            hovered = btn_rect.collidepoint(pygame.mouse.get_pos())
+            self.menu_hitboxes["btn_levelclear_next"] = btn_rect
+            pygame.draw.rect(self.screen, (70, 52, 20) if hovered else (45, 34, 18), btn_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (255, 225, 120) if hovered else (190, 145, 65), btn_rect, 2 if hovered else 1, border_radius=8)
+            prompt = self.font.render("【 点击或按 J / 空格 / 回车 进入第 2 关 】", True, (255, 240, 160) if hovered else (255, 215, 90))
+            self.screen.blit(prompt, prompt.get_rect(center=btn_rect.center))
+
+        elif current_state == "VICTORY":
+            veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            veil.fill((8, 12, 24, 210))
+            self.screen.blit(veil, (0, 0))
+            box_rect = pygame.Rect((WIDTH - 660) // 2, (HEIGHT - 310) // 2, 660, 310)
+            pygame.draw.rect(self.screen, (28, 22, 38), box_rect, border_radius=14)
+            pygame.draw.rect(self.screen, (255, 215, 0), box_rect, 4, border_radius=14)
+            full_run = self.starting_level == 1
+            title = self.big_font.render("期末项目演示 · 全关卡达成！" if full_run else "烈焰殿堂 · 挑战达成！", True, (255, 225, 90))
+            self.screen.blit(title, title.get_rect(center=(WIDTH // 2, box_rect.top + 50)))
+            result = "恭喜勇士！你已成功击溃【烈焰暴君】，通关全部2个关卡！" if full_run else "你击败了烈焰暴君，完成了第 2 关！"
+            subtitle = self.ui_font.render(result, True, WHITE)
+            self.screen.blit(subtitle, subtitle.get_rect(center=(WIDTH // 2, box_rect.top + 102)))
+            stats = self.ui_font.render(f"最终等级: Lv.{p.level}   总得分: {p.score}   总斩敌: {self.total_kills}", True, (140, 240, 180))
+            self.screen.blit(stats, stats.get_rect(center=(WIDTH // 2, box_rect.top + 152)))
+
+            options = [
+                ("btn_victory_restart", f"【R】 重战第 {self.starting_level} 关", (255, 220, 120)),
+                ("btn_victory_lobby", "【T】 返回城镇大厅", (255, 235, 170)),
+                ("btn_victory_menu", "【Esc】 返回主界面", (200, 215, 235)),
+            ]
+            mpos = pygame.mouse.get_pos()
+            for idx, (btn_name, opt_text, col) in enumerate(options):
+                btn_rect = pygame.Rect(box_rect.left + 30 + idx * 205, box_rect.top + 215, 190, 46)
+                hovered = btn_rect.collidepoint(mpos)
+                self.menu_hitboxes[btn_name] = btn_rect
+                bg_color = (68, 52, 92) if hovered else (44, 32, 60)
+                border_color = (255, 220, 110) if hovered else (160, 120, 200)
+                pygame.draw.rect(self.screen, bg_color, btn_rect, border_radius=8)
+                pygame.draw.rect(self.screen, border_color, btn_rect, 2 if hovered else 1, border_radius=8)
+                surf = self.font.render(opt_text, True, (255, 255, 255) if hovered else col)
+                self.screen.blit(surf, surf.get_rect(center=btn_rect.center))
+
+        elif current_state == "GAME_OVER":
+            veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            veil.fill((20, 6, 8, 210))
+            self.screen.blit(veil, (0, 0))
+            box_rect = pygame.Rect((WIDTH - 540) // 2, (HEIGHT - 260) // 2, 540, 260)
+            pygame.draw.rect(self.screen, (38, 16, 20), box_rect, border_radius=12)
+            pygame.draw.rect(self.screen, (230, 70, 70), box_rect, 3, border_radius=12)
+            title = self.big_font.render("你 被 击 败 了", True, (255, 80, 90))
+            self.screen.blit(title, title.get_rect(center=(WIDTH // 2, box_rect.top + 45)))
+            info = self.ui_font.render(f"倒在：第 {lvl} 关 · 第 {self.wave} 波    得分：{p.score}", True, WHITE)
+            self.screen.blit(info, info.get_rect(center=(WIDTH // 2, box_rect.top + 98)))
+
+            options = [
+                ("btn_gameover_restart", "【R】 重新挑战本关", (255, 220, 120)),
+                ("btn_gameover_lobby", "【T】 返回城镇大厅", (255, 235, 170)),
+                ("btn_gameover_menu", "【Esc】 返回主界面", (210, 210, 230)),
+            ]
+            mpos = pygame.mouse.get_pos()
+            for idx, (btn_name, opt_text, col) in enumerate(options):
+                btn_rect = pygame.Rect(box_rect.left + 24 + idx * 168, box_rect.top + 160, 156, 44)
+                hovered = btn_rect.collidepoint(mpos)
+                self.menu_hitboxes[btn_name] = btn_rect
+                bg_color = (75, 28, 35) if hovered else (52, 20, 26)
+                border_color = (255, 140, 140) if hovered else (160, 60, 70)
+                pygame.draw.rect(self.screen, bg_color, btn_rect, border_radius=8)
+                pygame.draw.rect(self.screen, border_color, btn_rect, 2 if hovered else 1, border_radius=8)
+                surf = self.font.render(opt_text, True, (255, 255, 255) if hovered else col)
+                self.screen.blit(surf, surf.get_rect(center=btn_rect.center))
+
+        elif current_state == "PAUSED":
+            veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            veil.fill((8, 10, 18, 185))
+            self.screen.blit(veil, (0, 0))
+            box_rect = pygame.Rect((WIDTH - 460) // 2, (HEIGHT - 310) // 2, 460, 310)
+            pygame.draw.rect(self.screen, (24, 28, 42), box_rect, border_radius=12)
+            pygame.draw.rect(self.screen, (100, 160, 240), box_rect, 3, border_radius=12)
+            title = self.big_font.render("游 戏 暂 停", True, (240, 245, 255))
+            self.screen.blit(title, title.get_rect(center=(WIDTH // 2, box_rect.top + 45)))
+            options = [
+                ("btn_pause_resume", "【1 / Esc】 继续战斗", (120, 230, 160)),
+                ("btn_pause_restart", "【2 / R】 重新开始本关", (240, 210, 100)),
+                ("btn_pause_lobby", "【T】 返回城镇大厅", (255, 225, 140)),
+                ("btn_pause_menu", "【3 / M】 返回主菜单", (210, 220, 240)),
+            ]
+            mpos = pygame.mouse.get_pos()
+            for idx, (btn_name, opt_text, col) in enumerate(options):
+                btn_rect = pygame.Rect(box_rect.centerx - 170, box_rect.top + 92 + idx * 48, 340, 38)
+                hovered = btn_rect.collidepoint(mpos)
+                self.menu_hitboxes[btn_name] = btn_rect
+                bg_color = (48, 58, 86) if hovered else (32, 38, 56)
+                border_color = (130, 200, 255) if hovered else (70, 95, 140)
+                pygame.draw.rect(self.screen, bg_color, btn_rect, border_radius=8)
+                pygame.draw.rect(self.screen, border_color, btn_rect, 2 if hovered else 1, border_radius=8)
+                surf = self.ui_font.render(opt_text, True, (255, 255, 255) if hovered else col)
+                self.screen.blit(surf, surf.get_rect(center=btn_rect.center))
+
+        if current_state in ("PAUSED", "GAME_OVER", "VICTORY", "LEVEL_CLEAR") and self.show_hitboxes:
+            self.draw_ui_hitboxes_overlay(self.screen, self.menu_hitboxes, pygame.mouse.get_pos())
+
+        self._draw_hitbox_pill()
         pygame.display.flip()
 
     def run(self):
@@ -1507,13 +2613,94 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.MOUSEMOTION:
+                    stage_pos = self._map_mouse_to_stage(event.pos)
+                    self.mouse_stage_pos = stage_pos
+                    current_state = getattr(self, "game_state", "PLAYING")
+                    if current_state == "START_SCREEN":
+                        self.start_screen.set_mouse_position(stage_pos)
+                    elif current_state == "WEAPON_SELECT" and getattr(self, "weapon_screen", None):
+                        self.weapon_screen.mouse_position = stage_pos
+                    elif current_state == "LOBBY" and hasattr(self, "lobby"):
+                        self.lobby.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=event.pos))
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    # Check hitbox toggle pill first
+                    if self.hitbox_pill_rect.collidepoint(event.pos):
+                        self.show_hitboxes = not self.show_hitboxes
+                        continue
+
+                    stage_pos = self._map_mouse_to_stage(event.pos)
+                    current_state = getattr(self, "game_state", "PLAYING")
+                    if current_state == "START_SCREEN":
+                        if stage_pos is not None:
+                            self.handle_start_action(self.start_screen.click(stage_pos))
+                    elif current_state == "OPENING" and getattr(self, "opening_cutscene", None) and stage_pos is not None:
+                        self.opening_cutscene.handle_click(stage_pos)
+                    elif current_state == "WEAPON_SELECT" and getattr(self, "weapon_screen", None) and stage_pos is not None:
+                        self.weapon_screen.handle_click(stage_pos)
+                    elif current_state == "LOBBY" and hasattr(self, "lobby"):
+                        res = self.lobby.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=event.pos))
+                        if isinstance(res, tuple) and res[0] == "start_stage":
+                            self.start_level(res[1])
+                        elif res == "pause_menu":
+                            self.game_state = "PAUSED"
+                    elif current_state == "PAUSED":
+                        for name, rect in self.menu_hitboxes.items():
+                            if rect.collidepoint(event.pos):
+                                if name == "btn_pause_resume":
+                                    self.game_state = "PLAYING"
+                                elif name == "btn_pause_restart":
+                                    self.reset(level=self.current_level)
+                                    self.game_state = "PLAYING"
+                                elif name == "btn_pause_lobby":
+                                    self.enter_lobby()
+                                elif name == "btn_pause_menu":
+                                    self.game_state = "START_SCREEN"
+                                break
+                    elif current_state == "GAME_OVER":
+                        for name, rect in self.menu_hitboxes.items():
+                            if rect.collidepoint(event.pos):
+                                if name == "btn_gameover_restart":
+                                    self.reset(level=self.current_level)
+                                    self.game_state = "PLAYING"
+                                elif name == "btn_gameover_lobby":
+                                    self.enter_lobby()
+                                elif name == "btn_gameover_menu":
+                                    self.game_state = "START_SCREEN"
+                                break
+                    elif current_state == "VICTORY":
+                        for name, rect in self.menu_hitboxes.items():
+                            if rect.collidepoint(event.pos):
+                                if name == "btn_victory_restart":
+                                    self.start_game(self.current_slot, self.starting_level)
+                                elif name == "btn_victory_lobby":
+                                    self.enter_lobby()
+                                elif name == "btn_victory_menu":
+                                    self.game_state = "START_SCREEN"
+                                break
+                    elif current_state == "LEVEL_CLEAR":
+                        for name, rect in self.menu_hitboxes.items():
+                            if rect.collidepoint(event.pos):
+                                if name == "btn_levelclear_next":
+                                    self.start_level(2)
+                                break
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        running = False
-                    elif not getattr(event, "repeat", False):
-                        self.handle_key(event.key)
+                    if event.key == pygame.K_F3:
+                        self.show_hitboxes = not self.show_hitboxes
+                        continue
+                    if getattr(self, "game_state", "PLAYING") == "START_SCREEN":
+                        if not getattr(event, "repeat", False):
+                            action = self.start_screen.key_action(event.key)
+                            if action == "quit":
+                                running = False
+                            else:
+                                self.handle_start_action(action)
+                    else:
+                        if not getattr(event, "repeat", False):
+                            self.handle_key(event.key)
                 elif event.type == pygame.KEYUP:
-                    self.player.direction_key_up(event.key)
+                    if getattr(self, "game_state", "PLAYING") in ("PLAYING", "LOBBY") and hasattr(self, "player") and self.player:
+                        self.player.direction_key_up(event.key)
             self.update(dt)
             self.draw()
         pygame.quit()

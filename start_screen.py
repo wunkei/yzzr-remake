@@ -274,6 +274,11 @@ class StartScreen:
             over = over.copy()
             over.set_alpha(round(255 * min(1.0, amount)))
             self.canvas.blit(over, target_rect)
+            # Distinct active hitbox boundary indicator
+            border_surf = pygame.Surface((hitbox.width, hitbox.height), pygame.SRCALPHA)
+            alpha = round(170 * min(1.0, max(amount, 0.4)))
+            pygame.draw.rect(border_surf, (255, 220, 110, alpha), border_surf.get_rect(), 2, border_radius=6)
+            self.canvas.blit(border_surf, hitbox.topleft)
         return hitbox
 
     def set_mouse_position(self, position: tuple[int, int] | None) -> None:
@@ -401,14 +406,22 @@ class StartScreen:
             for column in range(2):
                 slot = row * 2 + column + 1
                 x, y = (285 if column == 0 else 655), 178 + row * 92
+                slot_rect = pygame.Rect(x - 157, y - 37, 314, 74)
+                self.hitboxes[f"slot_{slot}"] = slot_rect
+                hovered = self.mouse_position is not None and slot_rect.collidepoint(self.mouse_position)
+                # Visual slot effective area frame
+                if hovered:
+                    pygame.draw.rect(self.canvas, (85, 48, 26), slot_rect, border_radius=6)
+                    pygame.draw.rect(self.canvas, (255, 215, 110), slot_rect, 2, border_radius=6)
+                else:
+                    pygame.draw.rect(self.canvas, (75, 45, 32), slot_rect, 1, border_radius=6)
                 text = self.save_entries[slot - 1]
                 lines = tuple(part.strip() for part in text.splitlines() if part.strip()) or ("空存档",)
                 if len(lines) == 1:
-                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y), (228, 222, 211), centered=True, shadow=(20, 15, 10))
+                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y), (255, 235, 190) if hovered else (228, 222, 211), centered=True, shadow=(20, 15, 10))
                 else:
-                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y - 9), (242, 236, 224), centered=True, shadow=(20, 15, 10))
-                    _crisp_text(self.canvas, lines[1], self.fonts[11], (x, y + 10), (218, 206, 188), centered=True, shadow=(20, 15, 10))
-                self.hitboxes[f"slot_{slot}"] = pygame.Rect(x - 157, y - 37, 314, 74)
+                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y - 9), (255, 240, 200) if hovered else (242, 236, 224), centered=True, shadow=(20, 15, 10))
+                    _crisp_text(self.canvas, lines[1], self.fonts[11], (x, y + 10), (240, 220, 170) if hovered else (218, 206, 188), centered=True, shadow=(20, 15, 10))
 
     def draw(self) -> pygame.Surface:
         self._draw_base()
@@ -448,11 +461,7 @@ class StartScreen:
                 return "close_saves"
             for name, rect in self.hitboxes.items():
                 if name.startswith("slot_") and rect.collidepoint(position):
-                    slot_index = int(name.removeprefix("slot_")) - 1
-                    self.selected_save_slot = slot_index
-                    if self.panel == "load" and self.save_entries[slot_index] == "空存档":
-                        return None
-                    return ("new_save" if self.panel == "new_save" else "load") + f"_slot_{slot_index + 1}"
+                    return self._slot_action(int(name.removeprefix("slot_")))
         for name, rect in reversed(tuple(self.hitboxes.items())):
             if not rect.collidepoint(position):
                 continue
@@ -470,6 +479,30 @@ class StartScreen:
                 self.player_mode = name
                 self.panel = "new_save"
             return name
+        return None
+
+    def _slot_action(self, slot: int) -> str | None:
+        self.selected_save_slot = slot - 1
+        if self.panel == "load" and self.save_entries[slot - 1] == "空存档":
+            return None
+        return f"{self.panel}_slot_{slot}"
+
+    def key_action(self, key: int) -> str | None:
+        if key == pygame.K_ESCAPE:
+            if self.panel is not None:
+                self.panel = None
+            elif self.menu_mode != "main":
+                self.menu_mode = "main"
+            else:
+                return "quit"
+        elif key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_j):
+            if self.panel in ("new_save", "load"):
+                return f"{self.panel}_slot_1"
+            if self.menu_mode == "mode":
+                self.player_mode = "single"
+                self.panel = "new_save"
+            else:
+                self.menu_mode = "mode"
         return None
 
 
@@ -516,11 +549,7 @@ def run_window() -> None:
                     if is_fullscreen:
                         is_fullscreen = False
                         window = pygame.display.set_mode(STAGE_SIZE, pygame.RESIZABLE)
-                    elif scene.panel is not None:
-                        scene.panel = None
-                    elif scene.menu_mode != "main":
-                        scene.menu_mode = "main"
-                    else:
+                    elif scene.key_action(event.key) == "quit":
                         running = False
                 elif event.key == pygame.K_1:
                     is_fullscreen = False
