@@ -36,3 +36,23 @@ python_assets/*_preview.png
 python_assets/*_test.png
 python_assets/preview_*.png
 python_assets/weapon_previews/
+
+# Local saves and root debug screenshots
+/myData_save.json
+.debug_hitbox/
+/1_view.png
+/7385_view.png
+/alignment_audit.png
+/alignment_final.png
+/bag_alignment_audit.png
+/bag_before.png
+/buttons_weapons.png
+/confirm_panel_crop.png
+/hud_before.png
+/hud_after*.png
+/map_images_contact.jpg
+/preview_*.png
+/reset_panel_crop.png
+/tmp_*.png
+/wq_panel_thumb.png
+

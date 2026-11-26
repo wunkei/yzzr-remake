@@ -10,19 +10,28 @@ import pygame
 
 from levels import ALL_STAGES, STAGES, TUTORIAL_STAGE
 from lobby import LobbyScene
+from hud_and_bag import InventoryBagModal, InventoryState, OriginalHUD, _safe_crisp_text
 from onboarding import (
     WEAPON_NAMES,
     OpeningCutscene,
     WeaponSelectionScreen,
 )
+from monster_system import (
+    MigratedEnemy as Enemy,
+    MonsterVisual,
+    Platform,
+    load_dummy_sprites,
+)
 from start_screen import STAGE_SIZE, StartScreen
+from ui_hitbox import ContentHitbox
 
 
 WIDTH, HEIGHT = 960, 540
 FPS = 60
 ANIMATION_FPS = 30
-WORLD_WIDTH = 2600
-GROUND_Y = 448
+WORLD_WIDTH = 2500
+GROUND_Y = 471
+LOBBY_GROUND_Y = 510
 GRAVITY = 1850
 DOUBLE_TAP_WINDOW = 0.30
 # The tutorial character/enemy SWFs define these Hit shapes in twips.
@@ -103,7 +112,123 @@ HITBOX_DEBUG_COLORS = {
     "敌人受击": (255, 85, 90),
     "玩家攻击": (255, 225, 65),
     "敌人攻击": (255, 155, 55),
+    "单向跳台": (0, 255, 200),
+    "地面地形": (255, 175, 45),
 }
+
+STAGE_PLATFORMS = {
+    888: [
+        # 试炼密林：左侧泥地 (y=464)，右侧抬高石阶 (y=400)，台阶立壁在 x=711
+        Platform(pygame.Rect(0, 464, 712, 120), is_one_way=False),
+        Platform(pygame.Rect(711, 400, 1440 - 711, 150), is_one_way=False),
+        # 教学跳台 (单向跳跃/下穿战术跳台)
+        Platform(pygame.Rect(260, 360, 200, 14), is_one_way=True),
+        Platform(pygame.Rect(980, 290, 220, 14), is_one_way=True),
+    ],
+    1: [
+        # 幽林试炼：基础地面 (y=471) 与原版多层战术浮空石台/拱桥
+        Platform(pygame.Rect(0, 471, 2500, 120), is_one_way=False),
+        Platform(pygame.Rect(140, 375, 130, 14), is_one_way=True),
+        Platform(pygame.Rect(380, 330, 260, 14), is_one_way=True),
+        Platform(pygame.Rect(720, 375, 140, 14), is_one_way=True),
+        Platform(pygame.Rect(820, 290, 280, 14), is_one_way=True),
+        Platform(pygame.Rect(920, 210, 180, 14), is_one_way=True),
+        Platform(pygame.Rect(1180, 290, 240, 14), is_one_way=True),
+        Platform(pygame.Rect(1480, 340, 240, 14), is_one_way=True),
+        Platform(pygame.Rect(1780, 290, 260, 14), is_one_way=True),
+        Platform(pygame.Rect(2100, 360, 240, 14), is_one_way=True),
+    ],
+    2: [
+        # 烈焰殿堂：基础地面 (y=471) 与熔岩神殿回廊/浮空黑曜石台
+        Platform(pygame.Rect(0, 471, 2500, 120), is_one_way=False),
+        Platform(pygame.Rect(300, 350, 240, 14), is_one_way=True),
+        Platform(pygame.Rect(620, 275, 260, 14), is_one_way=True),
+        Platform(pygame.Rect(960, 200, 320, 14), is_one_way=True),
+        Platform(pygame.Rect(1380, 275, 260, 14), is_one_way=True),
+        Platform(pygame.Rect(1720, 350, 240, 14), is_one_way=True),
+        Platform(pygame.Rect(2040, 285, 260, 14), is_one_way=True),
+    ],
+}
+
+
+def get_shadow_surface(
+    x: float,
+    bottom_y: float,
+    platforms: list[Platform],
+    current_platform: Platform | None = None,
+) -> tuple[float, Platform | None]:
+    """Find the nearest supporting platform/ground surface beneath a shadow center."""
+    if current_platform is not None and abs(bottom_y - current_platform.rect.top) <= 4:
+        return float(current_platform.rect.top), current_platform
+
+    best_y = float(HEIGHT)
+    best_plat: Platform | None = None
+    for plat in platforms:
+        if plat.rect.left <= x <= plat.rect.right:
+            if plat.rect.top >= bottom_y - 4 and plat.rect.top < best_y:
+                best_y = float(plat.rect.top)
+                best_plat = plat
+
+    if best_plat is None:
+        # Edge standing fallback before physics updates current_platform
+        for plat in platforms:
+            if plat.rect.left - 15 <= x <= plat.rect.right + 15:
+                if abs(plat.rect.top - bottom_y) <= 4 and plat.rect.top < best_y:
+                    best_y = float(plat.rect.top)
+                    best_plat = plat
+
+    return best_y, best_plat
+
+
+def get_surface_y_beneath(x: float, bottom_y: float, platforms: list[Platform]) -> float:
+    """Finds the nearest platform/ground surface directly below (x, bottom_y)."""
+    return get_shadow_surface(x, bottom_y, platforms)[0]
+
+
+def draw_ground_shadow(
+    screen: pygame.Surface,
+    world_cx: float,
+    bottom_y: float,
+    platforms: list[Platform],
+    base_w: int,
+    base_h: int,
+    camera: float,
+    current_platform: Platform | None = None,
+) -> None:
+    """Render a soft, altitude-scaled translucent ground shadow clipped to its surface."""
+    surface_y, support_plat = get_shadow_surface(
+        world_cx, bottom_y, platforms, current_platform=current_platform
+    )
+    height_above = max(0.0, surface_y - bottom_y)
+    shrink = max(0.38, 1.0 - height_above / 280.0)
+    alpha_fade = max(0.35, 1.0 - height_above / 320.0)
+    sw = max(12, round(base_w * shrink))
+    sh = max(4, round(base_h * shrink))
+    sx = round(world_cx - camera - sw / 2)
+    sy = round(surface_y - 1 - sh / 2)
+
+    sh_surf = pygame.Surface((sw, sh), pygame.SRCALPHA)
+    pygame.draw.ellipse(sh_surf, (8, 10, 18, round(72 * alpha_fade)), (0, 0, sw, sh))
+    inset_x = max(2, round(sw * 0.16))
+    inset_y = max(1, round(sh * 0.18))
+    if sw - 2 * inset_x > 2 and sh - 2 * inset_y > 1:
+        pygame.draw.ellipse(
+            sh_surf,
+            (6, 8, 15, round(105 * alpha_fade)),
+            (inset_x, inset_y, sw - 2 * inset_x, sh - 2 * inset_y),
+        )
+
+    if support_plat is not None:
+        clip_l = round(support_plat.rect.left - camera)
+        clip_r = round(support_plat.rect.right - camera)
+        vis_l = max(sx, clip_l)
+        vis_r = min(sx + sw, clip_r)
+        if vis_r <= vis_l:
+            return
+        screen.blit(sh_surf, (vis_l, sy), area=pygame.Rect(vis_l - sx, 0, vis_r - vis_l, sh))
+    else:
+        screen.blit(sh_surf, (sx, sy))
+
 ROOT = Path(__file__).resolve().parent
 
 
@@ -227,6 +352,7 @@ class OriginalCharacterVisual:
         1044: (-123, -933),
         492: (-167, -937),
     }
+    _SHADOW_METRICS_CACHE: dict[tuple[str, int], tuple[float, int] | None] = {}
 
     def __init__(self, load_cache=True):
         self.frames = []
@@ -676,6 +802,48 @@ class OriginalCharacterVisual:
                 else:
                     self.armor_frame = self.armor_frame % self.armor_frame_count + 1
 
+    def shadow_metrics(self, facing: int) -> tuple[float, int]:
+        """Return (world_x_offset, shadow_base_width) matching the current frame's body/feet stance."""
+        if not self.available or not self.anchor_x or not self.anchor_y:
+            return (0.0, 44)
+        key = (str(self.SPRITE_DIR), int(self.frame))
+        if key not in self._SHADOW_METRICS_CACHE:
+            metrics: tuple[float, int] | None = None
+            img_path = self.SPRITE_DIR / f"{self.frame}.png"
+            if img_path.is_file():
+                try:
+                    img = pygame.image.load(str(img_path)).convert_alpha()
+                    w, h = img.get_size()
+                    x0 = max(0, self.anchor_x - 65)
+                    x1 = min(w, self.anchor_x + 65)
+                    y1 = min(h, self.anchor_y + 2)
+                    if x1 > x0 and y1 > 0:
+                        sub = img.subsurface((x0, 0, x1 - x0, y1))
+                        mask = pygame.mask.from_surface(sub, 20)
+                        if mask.count() > 0:
+                            com_x = x0 + mask.centroid()[0] - self.anchor_x
+                            yf0 = max(0, y1 - 16)
+                            feet_sub = img.subsurface((x0, yf0, x1 - x0, y1 - yf0))
+                            feet_bb = feet_sub.get_bounding_rect(min_alpha=21)
+                            if feet_bb.width > 0:
+                                feet_mid = x0 + feet_bb.left + (feet_bb.width - 1) / 2.0 - self.anchor_x
+                                com_clamped = max(feet_mid - 14.0, min(feet_mid + 14.0, com_x))
+                                left_off = 0.72 * feet_mid + 0.28 * com_clamped
+                                base_w = max(40, min(50, round(37 + feet_bb.width * 0.25)))
+                                metrics = (left_off, base_w)
+                            else:
+                                metrics = (max(-20.0, min(20.0, com_x)), 43)
+                except pygame.error:
+                    metrics = None
+            self._SHADOW_METRICS_CACHE[key] = metrics
+
+        cached = self._SHADOW_METRICS_CACHE[key]
+        if cached is None:
+            left_off, base_w = (-5.5, 43)
+        else:
+            left_off, base_w = cached
+        return (-left_off if facing > 0 else left_off, base_w)
+
     def draw(self, screen, world_x, world_bottom, facing):
         if not self.available:
             return False
@@ -790,6 +958,16 @@ class Player:
         self.facing = 1
         self.hp = self.max_hp = 100
         self.mp = self.max_mp = 100000
+        # Original Player.as state fields.  Play_Interface.as reads these
+        # values every frame to toggle the status badges next to the HP/MP
+        # panel (zhongqiu1, jianren1 and yuhuo1).  Keep the original names so
+        # migrated skills can write to the same interface without adapters.
+        self.debuff = 0
+        self.zhongqiuState = 0
+        self.jianrenState = 0
+        self.shengmingState = 0
+        self.buffNine = [0] * 10
+        self.reBorn = 0
         self.on_ground = True
         self.attack_lock = 0.0
         self.combo_window = 0.0
@@ -814,6 +992,8 @@ class Player:
         self.dash_key = None
         self.is_dashing = False
         self.run_attack_timer = 0.0
+        self.drop_through_timer = 0.0
+        self.current_platform = None
         self.attack_active = False
         self.attack_targets = set()
         self.skill_hit_targets = {}
@@ -821,10 +1001,94 @@ class Player:
         self.last_attack_kind = "normal"
         self.attack_facing = 1
 
+    def reset_state(self, x=140.0, y=None, ground_y=GROUND_Y):
+        self.hp = self.max_hp
+        self.mp = self.max_mp
+        self.debuff = 0
+        self.zhongqiuState = 0
+        self.jianrenState = 0
+        self.shengmingState = 0
+        self.buffNine = [0] * 10
+        self.reBorn = 0
+        self.vx = 0.0
+        self.vy = 0.0
+        self.on_ground = True
+        self.facing = 1
+        self.attack_active = False
+        self.attack_timer = 0.0
+        self.attack_lock = 0.0
+        self.hurt_timer = 0.0
+        self.invincible = 0.0
+        self.active_action = None
+        self.action_gravity = 2
+        self.last_action_frame = 0
+        self.attack_motion_steps.clear()
+        self.attack_motion_index = 0
+        self.attack_motion_clock = 0.0
+        self.attack_motion_direction = 1
+        self.air_down_charge_timer = 0.0
+        self.air_down_released = False
+        self.combo_window = 0.0
+        self.combo = 0
+        self.is_dashing = False
+        self.dash_key = None
+        self.last_direction_tap.clear()
+        self.drop_through_timer = 0.0
+        self.current_platform = None
+        self.run_attack_timer = 0.0
+        self.attack_targets.clear()
+        self.skill_hit_targets.clear()
+        self.current_attack_run = False
+        self.last_attack_kind = "normal"
+        self.attack_facing = 1
+        self.rect.x = round(x)
+        if y is not None:
+            self.rect.y = round(y)
+        else:
+            self.rect.bottom = ground_y
+        self.x = float(self.rect.x)
+        self.y = float(self.rect.y)
+        if hasattr(self, "visual") and self.visual:
+            self.visual.one_shot = False
+            self.visual.desired_action = "站"
+            self.visual.action = None
+            self.visual.play("站", loop=True, force=True)
+
     def is_attack_locked(self):
         return self.hurt_timer > 0 or self.attack_active or self.attack_lock > 0 or bool(
             self.visual and self.visual.one_shot
         )
+
+    def activate_status(self, status: str, state: int = 1) -> bool:
+        """Apply one of the original mutually exclusive player statuses.
+
+        Player.as uses affect modes 6/7/8 to set zhongqiuState, jianrenState
+        or shengmingState and clears the other two.  Keeping that rule here
+        gives migrated items and tests a small, engine-neutral entry point.
+        """
+        field_by_name = {
+            "zhongqiu": "zhongqiuState",
+            "jianren": "jianrenState",
+            "shengming": "shengmingState",
+        }
+        field = field_by_name.get(str(status).lower())
+        if field is None:
+            return False
+        for other in field_by_name.values():
+            setattr(self, other, 0)
+        setattr(self, field, max(0, int(state)))
+        return True
+
+    def set_buff_nine(self, layer: int, duration: float) -> bool:
+        """Set an original 狱焰 layer timer (layer is 1..10)."""
+        try:
+            layer = int(layer)
+        except (TypeError, ValueError):
+            return False
+        if not 1 <= layer <= 10:
+            return False
+        self.buffNine[layer - 1] = max(0.0, float(duration))
+        return True
 
     def direction_key_down(self, key, now):
         if key not in self.LEFT_KEYS + self.RIGHT_KEYS:
@@ -865,7 +1129,25 @@ class Player:
                 self.attack_motion_steps.extend(steps)
         self.last_action_frame = max(self.last_action_frame, last_frame)
 
-    def update(self, dt, keys):
+    def update(self, dt, keys, world_width=WORLD_WIDTH, platforms=None):
+        # nineBuffTime() in the original decrements one timer every 27 SWF
+        # frames and advances from layer 10 down to layer 1.  Python keeps the
+        # same ten slots, expressed in seconds, while preserving the active
+        # layer semantics used by Play_Interface.showYHCS1/2.
+        dt = max(0.0, float(dt))
+        for idx, remaining in enumerate(self.buffNine):
+            self.buffNine[idx] = max(0.0, float(remaining) - dt)
+        self.reBorn = max(0.0, float(self.reBorn) - dt)
+        if getattr(self, "drop_through_timer", 0.0) > 0:
+            self.drop_through_timer = max(0.0, self.drop_through_timer - dt)
+
+        prev_x = self.x
+        prev_y = self.y
+        prev_bottom = prev_y + self.rect.height
+
+        if platforms is None:
+            platforms = [Platform(pygame.Rect(0, GROUND_Y, world_width, 120), is_one_way=False)]
+
         direction = int(keys[pygame.K_d] or keys[pygame.K_RIGHT]) - int(
             keys[pygame.K_a] or keys[pygame.K_LEFT]
         )
@@ -887,6 +1169,18 @@ class Player:
         if direction and not attack_controls_locked:
             self.facing = direction
         self.x += self.vx * dt
+
+        # Solid step obstacle blocking (e.g. step retaining wall)
+        entity_bottom = self.y + self.rect.height
+        for plat in platforms:
+            if not plat.is_one_way and entity_bottom > plat.rect.top + 6:
+                if prev_x + self.rect.width <= plat.rect.left + 8 and self.x + self.rect.width > plat.rect.left:
+                    self.x = float(plat.rect.left - self.rect.width)
+                    self.vx = 0.0
+                elif prev_x >= plat.rect.right - 8 and self.x < plat.rect.right:
+                    self.x = float(plat.rect.right)
+                    self.vx = 0.0
+
         if self.air_down_charge_timer > 0:
             self.air_down_charge_timer = max(0, self.air_down_charge_timer - dt)
             self.vy = 0
@@ -906,13 +1200,55 @@ class Player:
             self.y += move_y
             self.attack_motion_index += 1
             self.attack_motion_clock -= 1
-        self.x = clamp(self.x, 12, WORLD_WIDTH - self.rect.width - 12)
-        if self.y + self.rect.height >= GROUND_Y:
-            self.y = GROUND_Y - self.rect.height
-            self.vy = 0
+        self.x = clamp(self.x, 12, world_width - self.rect.width - 12)
+
+        # Platform landing detection
+        curr_bottom = self.y + self.rect.height
+        foot_l = self.x + 6
+        foot_r = self.x + self.rect.width - 6
+        is_dropping = getattr(self, "drop_through_timer", 0.0) > 0
+
+        landed_plat = None
+        highest_top = 9999.0
+        if self.vy >= 0:
+            for plat in platforms:
+                if foot_r >= plat.rect.left and foot_l <= plat.rect.right:
+                    if plat.is_one_way:
+                        if is_dropping:
+                            continue
+                        if prev_bottom <= plat.rect.top + 14 and curr_bottom >= plat.rect.top - 2:
+                            if plat.rect.top < highest_top:
+                                highest_top = plat.rect.top
+                                landed_plat = plat
+                    else:
+                        if curr_bottom >= plat.rect.top and prev_bottom <= plat.rect.bottom:
+                            if plat.rect.top < highest_top:
+                                highest_top = plat.rect.top
+                                landed_plat = plat
+
+        if landed_plat is not None:
+            self.y = float(landed_plat.rect.top - self.rect.height)
+            self.vy = 0.0
             self.on_ground = True
+            self.current_platform = landed_plat
         else:
-            self.on_ground = False
+            standing = False
+            if not is_dropping and self.current_platform is not None:
+                plat = self.current_platform
+                if foot_r >= plat.rect.left and foot_l <= plat.rect.right:
+                    if abs(curr_bottom - plat.rect.top) <= 5.0 and self.vy >= 0:
+                        self.y = float(plat.rect.top - self.rect.height)
+                        self.vy = 0.0
+                        self.on_ground = True
+                        standing = True
+            if not standing:
+                self.on_ground = False
+                self.current_platform = None
+                if self.y + self.rect.height >= 540:
+                    self.y = float(540 - self.rect.height)
+                    self.vy = 0.0
+                    self.on_ground = True
+
         self.rect.topleft = round(self.x), round(self.y)
         if self.visual:
             if self.hurt_timer > 0:
@@ -945,10 +1281,20 @@ class Player:
                 del self.skill_cooldowns[skill_type]
         self.invincible = max(0, self.invincible - dt)
 
-    def jump(self):
+    def jump(self, held_keys=None):
+        held_keys = held_keys or pygame.key.get_pressed()
+        down_held = bool(held_keys[pygame.K_s] or held_keys[pygame.K_DOWN])
+        if down_held and self.on_ground and self.current_platform and getattr(self.current_platform, "is_one_way", False):
+            # Down + Jump drops through one-way platform
+            self.drop_through_timer = 0.25
+            self.on_ground = False
+            self.current_platform = None
+            self.vy = 80.0
+            return
         if self.on_ground:
             self.vy = -670
             self.on_ground = False
+            self.current_platform = None
             # Match the SWF's KeyControl, which calls SkinPlay("跳") as soon
             # as a jump starts instead of waiting for the next movement tick.
             if self.visual:
@@ -1115,155 +1461,7 @@ class Player:
             self.visual.play("被打", loop=True, force=True)
 
 
-class Enemy:
-    def __init__(self, x, kind=0, *, name=None, max_hp=None, speed=None, attack_damage=None):
-        self.kind = kind
-        if kind == 2:
-            self.w, self.h = (76, 96) if max_hp is None or max_hp < 400 else (88, 110)
-            self.hp = self.max_hp = max_hp if max_hp is not None else 280
-            self.speed = speed if speed is not None else 65
-            self.stun_resistance_frames = 45
-            self.name = name or "关卡领主"
-            self.attack_damage = attack_damage if attack_damage is not None else 18
-        elif kind == 1:
-            self.w, self.h = (58, 78)
-            self.hp = self.max_hp = max_hp if max_hp is not None else 95
-            self.speed = speed if speed is not None else 54
-            self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
-            self.name = name or "重装护卫"
-            self.attack_damage = attack_damage if attack_damage is not None else 13
-        else:
-            self.w, self.h = (44, 58)
-            self.hp = self.max_hp = max_hp if max_hp is not None else 42
-            self.speed = speed if speed is not None else 78
-            self.stun_resistance_frames = DEFAULT_ENEMY_HURTSTUN_FRAMES
-            self.name = name or "前哨小怪"
-            self.attack_damage = attack_damage if attack_damage is not None else 8
-        self.rect = pygame.Rect(round(x), GROUND_Y - self.h, self.w, self.h)
-        self.x = float(x)
-        self.y = float(self.rect.y)
-        self.vy = 0.0
-        self.airborne = False
-        self.knockback_steps = []
-        self.knockback_index = 0
-        self.knockback_clock = 0.0
-        self.knockback_direction = 1
-        self.attack_cd = random.uniform(0.3, 0.9)
-        self.attack_frame = None
-        self.attack_elapsed_frames = 0.0
-        self.attack_did_hit = False
-        self.hurt_timer = 0.0
-        self.flash = 0.0
-        self.facing = -1
-
-    def hitbox(self):
-        if self.kind == 2:
-            width, height = round(self.w * 0.9), round(self.h * 0.95)
-        else:
-            width, height = ENEMY_HITBOX_SIZE
-        return pygame.Rect(
-            self.rect.centerx - width // 2,
-            self.rect.bottom - height + 10,
-            width,
-            height,
-        )
-
-    def attack_hitbox(self):
-        if self.attack_frame != ENEMY_ATTACK_FRAMES[0]:
-            return None
-        if self.kind == 2:
-            left, top, width, height = (-20, -round(self.h * 0.9), round(self.w * 0.6), round(self.h * 0.5))
-        else:
-            left, top, width, height = ENEMY_ATTACK_HITBOX
-        if self.facing < 0:
-            left = -left - width
-        return pygame.Rect(
-            self.rect.centerx + left,
-            self.rect.bottom + top,
-            width,
-            height,
-        )
-
-    def update(self, dt, player):
-        self.attack_cd = max(0, self.attack_cd - dt)
-        self.hurt_timer = max(0, self.hurt_timer - dt)
-        self.flash = max(0, self.flash - dt)
-        if self.attack_frame is not None:
-            self.attack_elapsed_frames += dt * ANIMATION_FPS
-            if self.attack_elapsed_frames >= ENEMY_ATTACK_FRAMES[1] - ENEMY_ATTACK_FRAMES[0] + 1:
-                self.attack_frame = None
-            else:
-                self.attack_frame = ENEMY_ATTACK_FRAMES[0] + int(self.attack_elapsed_frames)
-        self.knockback_clock += dt * ANIMATION_FPS
-        while self.knockback_clock >= 1 and self.knockback_index < len(self.knockback_steps):
-            move_x, move_y = self.knockback_steps[self.knockback_index]
-            self.x += move_x * self.knockback_direction
-            self.y += move_y
-            self.knockback_index += 1
-            self.knockback_clock -= 1
-            if self.y + self.h < GROUND_Y:
-                self.airborne = True
-            elif not self.airborne:
-                self.y = float(GROUND_Y - self.h)
-        if self.airborne:
-            self.y += self.vy * dt
-            self.vy += GRAVITY * dt
-            if self.y + self.h >= GROUND_Y:
-                self.y = float(GROUND_Y - self.h)
-                self.vy = 0.0
-                self.airborne = False
-            self.rect.y = round(self.y)
-        dx = player.rect.centerx - self.rect.centerx
-        self.facing = 1 if dx > 0 else -1
-        if (
-            self.attack_frame is None
-            and not self.airborne
-            and self.hurt_timer <= 0
-            and self.attack_cd <= 0
-            and abs(dx) <= 46
-            and abs(player.rect.bottom - self.rect.bottom) < 50
-        ):
-            self.attack_cd = 1.25 if self.kind == 0 else 1.55
-            self.attack_frame = ENEMY_ATTACK_FRAMES[0]
-            self.attack_elapsed_frames = 0.0
-            self.attack_did_hit = False
-        if self.attack_frame is None and not self.airborne and abs(dx) > 46 and self.hurt_timer <= 0:
-            self.x += self.facing * self.speed * dt
-        self.rect.x = round(self.x)
-
-    def take_hit(
-        self,
-        damage,
-        source_x,
-        launch_speed=0,
-        stun_duration=0.12,
-        knockback=15,
-        motion_duration=0,
-        attacker_facing=None,
-    ):
-        self.hp -= damage
-        self.flash = 0.12
-        self.attack_frame = None
-        self.attack_elapsed_frames = 0.0
-        self.hurt_timer = max(self.hurt_timer, stun_duration)
-        if attacker_facing is None:
-            self.knockback_direction = 1 if self.rect.centerx > source_x else -1
-        else:
-            self.knockback_direction = attacker_facing
-        self.vy = 0.0
-        if launch_speed < 0:
-            self.knockback_steps = []
-            self.y = float(GROUND_Y - self.h)
-            self.rect.y = round(self.y)
-            self.airborne = False
-        else:
-            self.knockback_steps = original_run_power_steps(
-                knockback, launch_speed, motion_duration, parabola=0.2
-            )
-            if launch_speed > 0 or self.y + self.h < GROUND_Y:
-                self.airborne = True
-        self.knockback_index = 0
-        self.knockback_clock = 0.0
+# Migrated monster logic and implementation are provided by monster_system.py (MigratedEnemy as Enemy)
 
 
 class Bolt:
@@ -1327,7 +1525,14 @@ class Game:
         self.player_visual = OriginalCharacterVisual()
         self.show_hitboxes = False
         self.menu_hitboxes: dict[str, pygame.Rect] = {}
-        self.hitbox_pill_rect: pygame.Rect = pygame.Rect(WIDTH - 156, 12, 144, 28)
+        self.hud_hitboxes: dict[str, pygame.Rect] = {}
+        self.hitbox_pill_rect: pygame.Rect = ContentHitbox(pygame.Rect(WIDTH - 156, 12, 144, 28), border_radius=6, tag="hitbox_pill")
+        self.inventory = InventoryState()
+        self.hud = OriginalHUD()
+        self.bag_modal = InventoryBagModal()
+        self._hud_toast_msg = ""
+        self._hud_toast_timer = 0.0
+        self._last_dt = 1.0 / FPS
 
         self.start_screen = StartScreen()
         self.game_state = "START_SCREEN"
@@ -1382,19 +1587,44 @@ class Game:
         self.small_font = load_font(12)
         self.pill_font = load_font(14)
 
+    def get_world_width(self):
+        lvl = getattr(self, "current_level", 1)
+        if lvl == 0:
+            return getattr(self.lobby, "world_width", 2600) if hasattr(self, "lobby") and self.lobby else 2600
+        bg = getattr(self, "bg_surfaces", {}).get(lvl)
+        if bg is not None:
+            return bg.get_width()
+        if lvl == 888:
+            return 1440
+        return 2500
+
+    def get_stage_platforms(self, level=None):
+        if level is None:
+            level = getattr(self, "current_level", 1)
+        if level == 0:
+            lobby_ground = getattr(self.lobby, "ground_y", LOBBY_GROUND_Y) if hasattr(self, "lobby") and self.lobby else LOBBY_GROUND_Y
+            w_width = self.get_world_width() if hasattr(self, "get_world_width") else 2600
+            return [Platform(pygame.Rect(0, lobby_ground, w_width, 120), is_one_way=False)]
+        w_width = self.get_world_width() if hasattr(self, "get_world_width") else WORLD_WIDTH
+        return STAGE_PLATFORMS.get(level, [Platform(pygame.Rect(0, GROUND_Y, w_width, 120), is_one_way=False)])
+
     def _load_stage_backgrounds(self):
         global _STAGE_BACKGROUND_CACHE
         if not _STAGE_BACKGROUND_CACHE:
+            by_path: dict[Path, pygame.Surface] = {}
             for level, stage in ALL_STAGES.items():
                 if stage.background.is_file():
-                    try:
-                        im = pygame.image.load(str(stage.background))
-                        target_w = max(WORLD_WIDTH, round(im.get_width() * HEIGHT / im.get_height()))
-                        _STAGE_BACKGROUND_CACHE[level] = pygame.transform.smoothscale(
-                            im, (target_w, HEIGHT)
-                        )
-                    except pygame.error:
-                        pass
+                    if stage.background not in by_path:
+                        try:
+                            im = pygame.image.load(str(stage.background))
+                            target_h = HEIGHT
+                            target_w = round(im.get_width() * target_h / im.get_height())
+                            by_path[stage.background] = pygame.transform.smoothscale(
+                                im, (target_w, target_h)
+                            )
+                        except pygame.error:
+                            continue
+                    _STAGE_BACKGROUND_CACHE[level] = by_path[stage.background]
         self.bg_surfaces = _STAGE_BACKGROUND_CACHE
 
     def _load_door_frames(self):
@@ -1416,17 +1646,10 @@ class Game:
     def _load_dummy_frames(self):
         global _DUMMY_FRAMES_CACHE
         if not _DUMMY_FRAMES_CACHE:
-            base = ROOT / "python_assets" / "onboarding" / "enemies"
             for i in range(1, 5):
-                p = base / f"dummy{i}" / "1.png"
-                if p.is_file():
-                    try:
-                        im = pygame.image.load(str(p)).convert_alpha()
-                        dh = 58 + 24
-                        dw = round(im.get_width() * dh / im.get_height())
-                        _DUMMY_FRAMES_CACHE[i] = pygame.transform.smoothscale(im, (dw, dh))
-                    except Exception:
-                        pass
+                sprites = load_dummy_sprites(i)
+                if sprites and 1 in sprites:
+                    _DUMMY_FRAMES_CACHE[i] = sprites[1]
         self.dummy_frames = _DUMMY_FRAMES_CACHE
 
     def _render_stage_canvas(self, canvas):
@@ -1532,6 +1755,8 @@ class Game:
             self.wave_banner_timer = 2.5
 
     def enter_lobby(self, slot=None):
+        self._ensure_ui_systems()
+        self.bag_modal.is_open = False
         if slot is not None:
             self.current_slot = slot
         self.current_level = 0
@@ -1542,6 +1767,7 @@ class Game:
         self.game_over = False
         self.victory = False
         self.door_active = False
+        self.tutorial_door_active = False
         self.wave_banner_text = ""
         self.wave_banner_timer = 0.0
 
@@ -1549,21 +1775,14 @@ class Game:
             if hasattr(self, "player_visual") and self.player_visual:
                 self.player_visual.play("站", loop=True, force=True)
             self.player = Player(getattr(self, "player_visual", None))
+            self.player.reset_state(x=240.0, ground_y=LOBBY_GROUND_Y)
         else:
-            p = self.player
-            p.hp = p.max_hp
-            p.mp = p.max_mp
-            p.rect.x = 240
-            p.rect.bottom = GROUND_Y
-            p.x = 240.0
-            p.y = float(p.rect.y)
-            p.vx = 0.0
-            p.vy = 0.0
-            if hasattr(p, "visual") and p.visual:
-                p.visual.play("站", loop=True, force=True)
+            self.player.reset_state(x=240.0, ground_y=LOBBY_GROUND_Y)
 
         self.game_state = "LOBBY"
         if hasattr(self, "lobby") and self.lobby:
+            self.lobby.active_modal = None
+            self.lobby.camera_x = 0.0
             self.lobby.show_toast(f"欢迎来到勇者村！按 M 或在右下角选择地图出征。")
 
     def start_game(self, slot=1, level=1):
@@ -1575,7 +1794,15 @@ class Game:
             self._apply_onboarding_weapon(use_secondary=bool(getattr(self, "current_weapon_hand", 0) == 1))
         self.game_state = "PLAYING"
 
-    def start_level(self, level):
+    def start_level(self, level, difficulty=None):
+        self._ensure_ui_systems()
+        self.bag_modal.is_open = False
+        if difficulty is not None:
+            self.current_difficulty = difficulty
+            if hasattr(self, "lobby") and self.lobby:
+                self.lobby.selected_difficulty = difficulty
+        elif not hasattr(self, "current_difficulty"):
+            self.current_difficulty = getattr(getattr(self, "lobby", None), "selected_difficulty", "普通")
         self.reset(level=level, full=False)
         self.game_state = "PLAYING"
 
@@ -1595,30 +1822,24 @@ class Game:
         self.wave_banner_timer = 2.0
         self.wave_banner_text = ""
 
+        spawn_ground = 464 if level == 888 else GROUND_Y
         if full or not hasattr(self, "player") or self.player is None:
             if hasattr(self, "player_visual") and self.player_visual:
                 self.player_visual.play("站", loop=True, force=True)
             self.player = Player(getattr(self, "player_visual", None))
+            self.player.reset_state(x=140.0, ground_y=spawn_ground)
         else:
             p = self.player
-            if p.hp <= 0:
-                p.hp = p.max_hp
-                p.mp = p.max_mp
+            prev_hp = p.hp
+            prev_max_hp = p.max_hp
+            prev_max_mp = p.max_mp
+            p.reset_state(x=140.0, ground_y=spawn_ground)
+            if prev_hp <= 0:
+                p.hp = prev_max_hp
+                p.mp = prev_max_mp
             else:
-                p.hp = min(p.max_hp, p.hp + p.max_hp // 2)
-                p.mp = min(p.max_mp, p.mp + p.max_mp // 2)
-            p.rect.x = 140
-            p.rect.bottom = GROUND_Y
-            p.x = 140.0
-            p.y = float(p.rect.y)
-            p.vx = 0.0
-            p.vy = 0.0
-            p.invincible = 0.0
-            p.attack_active = False
-            p.attack_timer = 0.0
-            p.hurt_timer = 0.0
-            if p.visual:
-                p.visual.play("站", loop=True, force=True)
+                p.hp = min(prev_max_hp, prev_hp + prev_max_hp // 2)
+                p.mp = min(prev_max_mp, p.mp + prev_max_mp // 2)
 
         self.spawn_wave()
 
@@ -1629,98 +1850,100 @@ class Game:
             if self.wave == 1:
                 self.wave_banner_text = "【教学 1/4 · 基础攻击】按 [A] [D] 移动，按 [K] 跳跃，按 [J] 连续普攻！"
                 self.enemies.append(
-                    Enemy(650, kind=0, name="教学怪1 (基础木桩)", max_hp=45, speed=20, attack_damage=2)
+                    Enemy(650, kind=0, name="教学怪1 (基础木桩)", max_hp=45, speed=20, attack_damage=2, ground_y=464)
                 )
             elif self.wave == 2:
                 self.wave_banner_text = "【教学 2/4 · 技能浮空】按 [W + J] 升龙挑起，按 [S + J] 下劈重扣！"
                 self.enemies.append(
-                    Enemy(650, kind=0, name="教学怪2 (浮空木桩)", max_hp=55, speed=20, attack_damage=3)
+                    Enemy(650, kind=0, name="教学怪2 (浮空木桩)", max_hp=55, speed=20, attack_damage=3, ground_y=464)
                 )
             elif self.wave == 3:
                 self.wave_banner_text = "【教学 3/4 · 冲刺与切武器】双击方向冲斩；按 [L] 切换主副手武器！"
                 self.enemies.append(
-                    Enemy(650, kind=1, name="教学怪3 (敏捷靶怪)", max_hp=70, speed=32, attack_damage=4)
+                    Enemy(650, kind=1, name="教学怪3 (敏捷靶怪)", max_hp=70, speed=32, attack_damage=4, ground_y=464)
                 )
             else:
                 self.wave_banner_text = "【教学 4/4 · 毕业考核】综合运用全部连招，击破终极试炼靶怪！"
                 self.enemies.append(
-                    Enemy(700, kind=2, name="教学怪4 (终极傀儡)", max_hp=100, speed=36, attack_damage=5)
+                    Enemy(700, kind=2, name="教学怪4 (终极傀儡)", max_hp=100, speed=36, attack_damage=5, ground_y=464)
                 )
         elif getattr(self, "current_level", 1) == 1:
             if self.wave == 1:
-                self.wave_banner_text = "第 1 波：潜伏的前哨怪！"
+                self.wave_banner_text = "第 1 关 · 第 1 波：潜伏的小蛇群！"
                 for i in range(3):
                     x = 600 + i * 260 + random.randint(-30, 30)
-                    m_hp = 1000000 if i == 0 else 45
-                    m_name = "幽林前哨 (100万血木桩)" if i == 0 else "幽林前哨"
                     self.enemies.append(
-                        Enemy(min(x, WORLD_WIDTH - 150), kind=0, name=m_name, max_hp=m_hp, speed=75, attack_damage=8)
+                        Enemy(min(x, WORLD_WIDTH - 150), kind=0, name="小蛇", max_hp=45, speed=75, attack_damage=8)
                     )
             elif self.wave == 2:
-                self.wave_banner_text = "第 2 波：精锐巡逻队！"
-                for i in range(3):
-                    x = 550 + i * 220 + random.randint(-25, 25)
+                self.wave_banner_text = "第 2 波：小蛇与独眼巡逻队！"
+                for i in range(2):
+                    x = 550 + i * 260 + random.randint(-25, 25)
                     self.enemies.append(
-                        Enemy(min(x, WORLD_WIDTH - 200), kind=0, name="幽林前哨", max_hp=50, speed=80, attack_damage=9)
+                        Enemy(min(x, WORLD_WIDTH - 200), kind=0, name="小蛇", max_hp=50, speed=75, attack_damage=8)
                     )
                 self.enemies.append(
-                    Enemy(1300, kind=1, name="重装守卫", max_hp=110, speed=56, attack_damage=14)
+                    Enemy(1100, kind=1, name="独眼怪", max_hp=65, speed=78, attack_damage=10)
+                )
+                self.enemies.append(
+                    Enemy(1380, kind=1, name="独眼怪", max_hp=65, speed=78, attack_damage=10)
                 )
             else:
-                self.wave_banner_text = "警告：关卡首领【双头狂暴巨蜥】出现！"
+                self.wave_banner_text = f"警告：关卡首领【{STAGES[1].boss}】出现！"
                 self.enemies.append(
-                    Enemy(600, kind=0, name="幽林护卫", max_hp=55, speed=80, attack_damage=9)
+                    Enemy(650, kind=0, name="小蛇", max_hp=50, speed=75, attack_damage=8)
                 )
                 self.enemies.append(
-                    Enemy(850, kind=0, name="幽林护卫", max_hp=55, speed=80, attack_damage=9)
+                    Enemy(950, kind=1, name="独眼怪", max_hp=70, speed=78, attack_damage=10)
                 )
                 self.enemies.append(
-                    Enemy(1050, kind=1, name="狂化先锋", max_hp=120, speed=60, attack_damage=15)
-                )
-                self.enemies.append(
-                    Enemy(1350, kind=2, name=STAGES[1].boss, max_hp=300, speed=68, attack_damage=18)
+                    Enemy(1350, kind=2, name=STAGES[1].boss, max_hp=320, speed=72, attack_damage=18)
                 )
         else:
             if self.wave == 1:
-                self.wave_banner_text = "第 2 关 · 第 1 波：烈焰精锐部队！"
-                for i in range(4):
-                    x = 550 + i * 240 + random.randint(-20, 20)
-                    kind = 1 if i == 3 else 0
+                self.wave_banner_text = "第 2 关 · 第 1 波：烈焰雨伞怪群！"
+                for i in range(3):
+                    x = 600 + i * 260 + random.randint(-20, 20)
                     self.enemies.append(
-                        Enemy(
-                            min(x, WORLD_WIDTH - 150),
-                            kind=kind,
-                            name="烈焰斥候" if kind == 0 else "炽热巨蜥",
-                            max_hp=65 if kind == 0 else 130,
-                            speed=88 if kind == 0 else 60,
-                            attack_damage=12 if kind == 0 else 16,
-                        )
+                        Enemy(min(x, WORLD_WIDTH - 150), kind=0, name="雨伞怪", max_hp=60, speed=82, attack_damage=10)
                     )
             elif self.wave == 2:
-                self.wave_banner_text = "第 2 波：圣殿重装军团！"
+                self.wave_banner_text = "第 2 波：雨伞怪与独眼精锐！"
                 self.enemies.append(
-                    Enemy(550, kind=0, name="烈焰狂信徒", max_hp=70, speed=90, attack_damage=13)
+                    Enemy(550, kind=0, name="雨伞怪", max_hp=65, speed=82, attack_damage=10)
                 )
                 self.enemies.append(
-                    Enemy(800, kind=1, name="熔岩铁卫", max_hp=140, speed=62, attack_damage=18)
+                    Enemy(850, kind=1, name="独眼怪2", max_hp=85, speed=88, attack_damage=13)
                 )
                 self.enemies.append(
-                    Enemy(1050, kind=1, name="熔岩铁卫", max_hp=140, speed=62, attack_damage=18)
+                    Enemy(1100, kind=1, name="独眼怪2", max_hp=85, speed=88, attack_damage=13)
                 )
                 self.enemies.append(
-                    Enemy(1300, kind=0, name="烈焰狂信徒", max_hp=70, speed=90, attack_damage=13)
+                    Enemy(1350, kind=0, name="雨伞怪", max_hp=65, speed=82, attack_damage=10)
                 )
             else:
-                self.wave_banner_text = "极度危险：关底魔王【烈焰暴君 · 龙魔使】降临！"
+                cur_lvl = getattr(self, "current_level", 1)
+                stage_obj = ALL_STAGES.get(cur_lvl, STAGES[2])
+                self.wave_banner_text = f"极度危险：关底魔王【{stage_obj.boss}】降临！"
                 self.enemies.append(
-                    Enemy(650, kind=1, name="龙血禁卫", max_hp=150, speed=65, attack_damage=18)
+                    Enemy(650, kind=0, name="雨伞怪", max_hp=70, speed=80, attack_damage=10)
                 )
                 self.enemies.append(
-                    Enemy(900, kind=1, name="龙血禁卫", max_hp=150, speed=65, attack_damage=18)
+                    Enemy(950, kind=1, name="独眼怪2", max_hp=90, speed=88, attack_damage=14)
                 )
                 self.enemies.append(
-                    Enemy(1250, kind=2, name=STAGES[2].boss, max_hp=580, speed=84, attack_damage=25)
+                    Enemy(1250, kind=2, name=stage_obj.boss, max_hp=560, speed=82, attack_damage=22)
                 )
+
+        # Apply star/difficulty multipliers (1★ 普通, 2★ 困难, 3★ 英雄, 4★ 炼狱)
+        if getattr(self, "current_level", 1) != 888:
+            diff_name = getattr(self, "current_difficulty", "普通")
+            diff_mult = {"普通": 1.0, "困难": 1.35, "英雄": 1.75, "炼狱": 2.2}.get(diff_name, 1.0)
+            if diff_mult > 1.0:
+                for en in self.enemies:
+                    en.max_hp = max(1, round(en.max_hp * diff_mult))
+                    en.hp = en.max_hp
+                    en.attack_damage = max(1, round(en.attack_damage * (1.0 + (diff_mult - 1.0) * 0.6)))
 
     def handle_key(self, key):
         if key == pygame.K_F3:
@@ -1740,26 +1963,30 @@ class Game:
                 return
             if getattr(self, "tutorial_door_active", False):
                 p = getattr(self, "player", None)
-                door_rect = pygame.Rect(1468 - 46, GROUND_Y - 261, 93, 261)
-                if p and (abs(p.rect.centerx - 1468) <= 70 or p.rect.colliderect(door_rect)):
+                door_rect = pygame.Rect(1321 - 46, 400 - 261, 93, 261)
+                if p and (abs(p.rect.centerx - 1321) <= 80 or p.rect.centerx >= 1300 or abs(p.rect.centerx - 1468) <= 80 or p.rect.colliderect(door_rect)):
                     if key in (pygame.K_w, pygame.K_UP):
                         self.finish_tutorial()
                         return
 
         if current_state == "LOBBY" and hasattr(self, "lobby"):
+            self._ensure_ui_systems()
             res = self.lobby.handle_event(pygame.event.Event(pygame.KEYDOWN, key=key))
             if isinstance(res, tuple) and res[0] == "start_stage":
-                self.start_level(res[1])
+                self.starting_level = res[1]
+                self.start_level(res[1], res[2] if len(res) > 2 else None)
+            elif res == "toggle_bag":
+                self.toggle_bag()
             elif res == "pause_menu":
                 self.game_state = "PAUSED"
-            elif key in Player.LEFT_KEYS + Player.RIGHT_KEYS:
+            elif not self.bag_modal.is_open and key in Player.LEFT_KEYS + Player.RIGHT_KEYS:
                 p = getattr(self, "player", None)
                 if p:
                     p.direction_key_down(key, pygame.time.get_ticks() / 1000.0)
             elif key == pygame.K_k:
                 p = getattr(self, "player", None)
                 if p:
-                    p.jump()
+                    p.jump(pygame.key.get_pressed())
             return
 
         if current_state == "PAUSED":
@@ -1768,7 +1995,7 @@ class Game:
             elif key in (pygame.K_r, pygame.K_2):
                 self.reset(level=self.current_level)
                 self.game_state = "PLAYING"
-            elif key in (pygame.K_t, pygame.K_l):
+            elif key in (pygame.K_t, pygame.K_l, pygame.K_w, pygame.K_UP):
                 self.enter_lobby()
             elif key in (pygame.K_m, pygame.K_3, pygame.K_BACKSPACE):
                 self.game_state = "START_SCREEN"
@@ -1777,12 +2004,14 @@ class Game:
         if current_state == "LEVEL_CLEAR":
             if key in (pygame.K_j, pygame.K_SPACE, pygame.K_RETURN):
                 self.start_level(2)
+            elif key in (pygame.K_w, pygame.K_UP, pygame.K_t):
+                self.enter_lobby()
             return
 
         if current_state == "VICTORY":
             if key == pygame.K_r:
                 self.start_game(self.current_slot, self.starting_level)
-            elif key in (pygame.K_t, pygame.K_SPACE, pygame.K_RETURN):
+            elif key in (pygame.K_t, pygame.K_w, pygame.K_UP, pygame.K_SPACE, pygame.K_RETURN):
                 self.enter_lobby()
             elif key == pygame.K_ESCAPE:
                 self.game_state = "START_SCREEN"
@@ -1792,15 +2021,25 @@ class Game:
             if key == pygame.K_r:
                 self.reset(level=self.current_level)
                 self.game_state = "PLAYING"
-            elif key in (pygame.K_t, pygame.K_SPACE, pygame.K_RETURN):
+            elif key in (pygame.K_t, pygame.K_w, pygame.K_UP, pygame.K_SPACE, pygame.K_RETURN):
                 self.enter_lobby()
             elif key == pygame.K_ESCAPE:
                 self.game_state = "START_SCREEN"
             return
 
-        if current_state == "PLAYING" and key == pygame.K_ESCAPE:
-            self.game_state = "PAUSED"
-            return
+        if current_state == "PLAYING":
+            self._ensure_ui_systems()
+            if key == pygame.K_b:
+                self.toggle_bag()
+                return
+            if key == pygame.K_ESCAPE:
+                if self.bag_modal.is_open:
+                    self.bag_modal.is_open = False
+                    return
+                self.game_state = "PAUSED"
+                return
+            if self.bag_modal.is_open:
+                return
 
         p = getattr(self, "player", None)
         if not p:
@@ -1814,19 +2053,25 @@ class Game:
             p.direction_key_down(key, pygame.time.get_ticks() / 1000.0)
             return
         if key == pygame.K_k:
-            p.jump()
+            p.jump(pygame.key.get_pressed())
         elif key in (pygame.K_j, pygame.K_z):
             if p.attack(pygame.key.get_pressed()) and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
             if hasattr(self, "sound_manager"):
                 self.sound_manager.play("swing")
-        elif key in (pygame.K_h, pygame.K_1):
+        elif key == pygame.K_1:
+            self._use_quick_item(0)
+        elif key == pygame.K_2:
+            self._use_quick_item(1)
+        elif key == pygame.K_3:
+            self._use_quick_item(2)
+        elif key == pygame.K_h:
             if p.attack(requested_kind="skill1") and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
-        elif key in (pygame.K_u, pygame.K_2):
+        elif key == pygame.K_u:
             if p.attack(requested_kind="skill2") and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
-        elif key in (pygame.K_i, pygame.K_3):
+        elif key == pygame.K_i:
             if p.attack(requested_kind="skill3") and (not p.visual or not p.visual.available):
                 self.resolve_player_attack()
         elif key in (pygame.K_o, pygame.K_4):
@@ -1848,7 +2093,10 @@ class Game:
             p.visual.cycle_costume()
 
     def update(self, dt):
+        self._tick_hud_ui(dt)
         current_state = getattr(self, "game_state", "PLAYING")
+        if current_state == "PLAYING" and getattr(self, "bag_modal", None) and self.bag_modal.is_open:
+            return
         if current_state == "OPENING" and getattr(self, "opening_cutscene", None):
             self.opening_cutscene.update(dt)
             return
@@ -1867,6 +2115,7 @@ class Game:
                 self.weapon_screen.update(dt)
             return
 
+        w_width = self.get_world_width()
         if current_state == "LEVEL_CLEAR":
             if self.door_active and self.door_frames:
                 self.door_animation_timer += dt
@@ -1876,10 +2125,14 @@ class Game:
             p = getattr(self, "player", None)
             if p:
                 keys = pygame.key.get_pressed()
-                p.update(dt, keys)
+                platforms = self.get_stage_platforms()
+                p.update(dt, keys, world_width=w_width, platforms=platforms)
                 door_rect = pygame.Rect(2400, GROUND_Y - 277, 109, 277)
                 if p.rect.colliderect(door_rect):
-                    self.start_level(2)
+                    if keys[pygame.K_w] or keys[pygame.K_UP] or keys[pygame.K_t]:
+                        self.enter_lobby()
+                    else:
+                        self.start_level(2)
             return
 
         if self.game_over or self.victory:
@@ -1894,10 +2147,11 @@ class Game:
 
         p = self.player
         keys = pygame.key.get_pressed()
-        p.update(dt, keys)
+        platforms = self.get_stage_platforms()
+        p.update(dt, keys, world_width=w_width, platforms=platforms)
         self.resolve_player_attack()
         for enemy in self.enemies:
-            enemy.update(dt, p)
+            enemy.update(dt, p, platforms=platforms)
         self.resolve_enemy_attacks()
         for bolt in self.bolts:
             bolt.update(dt)
@@ -1906,9 +2160,10 @@ class Game:
                     enemy.take_hit(32 + (p.level - 1) * 4, p.rect.centerx)
                     bolt.life = 0
         self.bolts = [b for b in self.bolts if b.life > 0]
-        defeated = [e for e in self.enemies if e.hp <= 0]
+        defeated = [e for e in self.enemies if e.hp <= 0 and not getattr(e, "reward_granted", False)]
         if defeated:
             for enemy in defeated:
+                enemy.reward_granted = True
                 self.total_kills += 1
                 xp_gain = 50 if getattr(enemy, "kind", 0) == 2 else (35 if getattr(enemy, "kind", 0) == 1 else 25)
                 score_gain = 500 if getattr(enemy, "kind", 0) == 2 else (200 if getattr(enemy, "kind", 0) == 1 else 100)
@@ -1920,17 +2175,19 @@ class Game:
                     p.level += 1
                     p.max_hp += 12
                     p.hp = min(p.max_hp, p.hp + 25)
-            self.enemies = [e for e in self.enemies if e.hp > 0]
+        # Retain dying enemies until death crumble animation completes
+        self.enemies = [e for e in self.enemies if not getattr(e, "is_removed", False)]
         if p.hp <= 0:
             self.game_over = True
             self.game_state = "GAME_OVER"
-        if not self.enemies:
+        active_enemies = [e for e in self.enemies if e.hp > 0]
+        if not active_enemies:
             self.wave_pause += dt
             if getattr(self, "current_level", 1) == 888:
                 if self.wave >= 4:
                     if not getattr(self, "tutorial_door_active", False):
                         self.tutorial_door_active = True
-                        self.wave_banner_text = "【试炼通关】前往右侧传送阵 (坐标 1468)，按 [W] 传送回村！"
+                        self.wave_banner_text = "【试炼通关】前往右侧传送阵，按 [W] 传送回村！"
                         self.wave_banner_timer = 5.0
                 elif self.wave_pause > 1.2:
                     self.wave_pause = 0
@@ -1961,8 +2218,8 @@ class Game:
                 if self.door_animation_timer >= 0.08:
                     self.door_animation_timer = 0.0
                     self.door_frame_index = (self.door_frame_index + 1) % len(self.door_frames)
-            door_rect = pygame.Rect(1468 - 46, GROUND_Y - 261, 93, 261)
-            if abs(p.rect.centerx - 1468) <= 70 or p.rect.colliderect(door_rect):
+            door_rect = pygame.Rect(1321 - 46, 400 - 261, 93, 261)
+            if abs(p.rect.centerx - 1321) <= 80 or p.rect.centerx >= 1300 or abs(p.rect.centerx - 1468) <= 80 or p.rect.colliderect(door_rect):
                 if keys[pygame.K_w] or keys[pygame.K_UP]:
                     self.finish_tutorial()
                     return
@@ -1991,6 +2248,9 @@ class Game:
             attack_box = enemy.attack_hitbox()
             if attack_box is not None:
                 regions.append(("敌人攻击", attack_box))
+        for plat in self.get_stage_platforms():
+            label = "单向跳台" if plat.is_one_way else "地面地形"
+            regions.append((label, plat.rect))
         return [
             (label, box.move(offset, 0), HITBOX_DEBUG_COLORS[label])
             for label, box in regions
@@ -2010,6 +2270,7 @@ class Game:
             ("E-HURT", HITBOX_DEBUG_COLORS["敌人受击"]),
             ("P-ATK", HITBOX_DEBUG_COLORS["玩家攻击"]),
             ("E-ATK", HITBOX_DEBUG_COLORS["敌人攻击"]),
+            ("PLATFORM", HITBOX_DEBUG_COLORS["单向跳台"]),
         ]
         for label, color in entries:
             self.screen.blit(self.font.render(label, True, color), (x, y))
@@ -2044,21 +2305,41 @@ class Game:
             fill_col = (255, 190, 40, 50) if is_hovered else (0, 190, 255, 30)
             border_col = (255, 215, 60, 240) if is_hovered else (0, 220, 255, 220)
 
-            pygame.draw.rect(overlay, fill_col, rect)
-            pygame.draw.rect(overlay, border_col, rect, 2)
+            mask = getattr(rect, "mask", None)
+            border_radius = getattr(rect, "border_radius", 0)
 
-            cl = min(8, rect.width // 4, rect.height // 4)
-            if cl > 2:
-                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.left, rect.top), (rect.left + cl, rect.top), 2)
-                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.left, rect.top), (rect.left, rect.top + cl), 2)
-                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.right - 1, rect.bottom - 1), (rect.right - 1 - cl, rect.bottom - 1), 2)
-                pygame.draw.line(overlay, (255, 255, 255, 250), (rect.right - 1, rect.bottom - 1), (rect.right - 1, rect.bottom - 1 - cl), 2)
+            if mask is not None:
+                mask_surf = mask.to_surface(setcolor=fill_col, unsetcolor=(0, 0, 0, 0))
+                overlay.blit(mask_surf, rect.topleft)
+                outline = mask.outline()
+                if len(outline) > 2:
+                    outline_pts = [(rect.left + p[0], rect.top + p[1]) for p in outline]
+                    pygame.draw.lines(overlay, border_col, True, outline_pts, 2)
+                cl = min(8, rect.width // 4, rect.height // 4)
+                if cl > 2:
+                    pygame.draw.line(overlay, (255, 255, 255, 200), (rect.left, rect.top), (rect.left + cl, rect.top), 1)
+                    pygame.draw.line(overlay, (255, 255, 255, 200), (rect.left, rect.top), (rect.left, rect.top + cl), 1)
+                    pygame.draw.line(overlay, (255, 255, 255, 200), (rect.right - 1, rect.bottom - 1), (rect.right - 1 - cl, rect.bottom - 1), 1)
+                    pygame.draw.line(overlay, (255, 255, 255, 200), (rect.right - 1, rect.bottom - 1), (rect.right - 1, rect.bottom - 1 - cl), 1)
+            elif border_radius > 0:
+                pygame.draw.rect(overlay, fill_col, rect, border_radius=border_radius)
+                pygame.draw.rect(overlay, border_col, rect, 2, border_radius=border_radius)
+            else:
+                pygame.draw.rect(overlay, fill_col, rect)
+                pygame.draw.rect(overlay, border_col, rect, 2)
+
+                cl = min(8, rect.width // 4, rect.height // 4)
+                if cl > 2:
+                    pygame.draw.line(overlay, (255, 255, 255, 250), (rect.left, rect.top), (rect.left + cl, rect.top), 2)
+                    pygame.draw.line(overlay, (255, 255, 255, 250), (rect.left, rect.top), (rect.left, rect.top + cl), 2)
+                    pygame.draw.line(overlay, (255, 255, 255, 250), (rect.right - 1, rect.bottom - 1), (rect.right - 1 - cl, rect.bottom - 1), 2)
+                    pygame.draw.line(overlay, (255, 255, 255, 250), (rect.right - 1, rect.bottom - 1), (rect.right - 1, rect.bottom - 1 - cl), 2)
 
             tag = f"[{name}: {rect.width}x{rect.height}]" + (" ★" if is_hovered else "")
             tag_surf = tag_font.render(tag, True, (255, 240, 180) if is_hovered else (200, 240, 255))
 
-            if tag_surf.get_width() > rect.width and rect.width > 30:
-                scale_f = min(1.0, max(0.65, (rect.width + 20) / tag_surf.get_width()))
+            if tag_surf.get_width() > rect.width and rect.width > 20:
+                scale_f = min(1.0, max(0.55, (rect.width + 6) / tag_surf.get_width()))
                 if scale_f < 0.95:
                     tag_surf = pygame.transform.smoothscale(
                         tag_surf, (round(tag_surf.get_width() * scale_f), round(tag_surf.get_height() * scale_f))
@@ -2199,17 +2480,8 @@ class Game:
         lvl = getattr(self, "current_level", 1)
         bg = getattr(self, "bg_surfaces", {}).get(lvl)
         if bg is not None:
-            bg_w = bg.get_width()
-            max_cam = max(1, WORLD_WIDTH - WIDTH)
-            max_bg_offset = max(0, bg_w - WIDTH)
-            bg_x = -round(camera * max_bg_offset / max_cam)
+            bg_x = -round(camera)
             self.screen.blit(bg, (bg_x, 0))
-            g_col = (37, 42, 55) if lvl == 1 else (45, 25, 22)
-            top_line_col = (75, 113, 79) if lvl == 1 else (180, 70, 40)
-            pygame.draw.rect(self.screen, g_col, (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
-            pygame.draw.rect(self.screen, top_line_col, (0, GROUND_Y, WIDTH, 8))
-            for x in range(-int(camera) % 56, WIDTH, 56):
-                pygame.draw.line(self.screen, (g_col[0] + 12, g_col[1] + 12, g_col[2] + 12), (x, GROUND_Y + 16), (x - 24, HEIGHT), 2)
         else:
             sky_col = SKY if lvl == 1 else (42, 18, 16)
             self.screen.fill(sky_col)
@@ -2228,15 +2500,75 @@ class Game:
             for x in range(-int(camera) % 56, WIDTH, 56):
                 pygame.draw.line(self.screen, (g_col[0] + 12, g_col[1] + 12, g_col[2] + 12), (x, GROUND_Y + 20), (x - 24, HEIGHT), 2)
 
+    def draw_platforms(self, camera):
+        lvl = getattr(self, "current_level", 1)
+        for plat in self.get_stage_platforms():
+            if not plat.is_one_way:
+                continue
+            rx = round(plat.rect.x - camera)
+            ry = plat.rect.y
+            rw = plat.rect.width
+            rh = plat.rect.height
+            if -250 < rx < WIDTH + 100:
+                # Platform shadow underneath
+                sh_surf = pygame.Surface((rw + 20, 16), pygame.SRCALPHA)
+                pygame.draw.ellipse(sh_surf, (10, 12, 18, 90), sh_surf.get_rect())
+                self.screen.blit(sh_surf, (rx - 10, ry + rh - 4))
+
+                # Platform main slab styling
+                if lvl == 1:
+                    slab_col = (42, 50, 58)
+                    edge_col = (72, 135, 90)
+                    glow_col = (130, 220, 155)
+                    brace_col = (30, 36, 44)
+                elif lvl == 2:
+                    slab_col = (46, 28, 26)
+                    edge_col = (185, 75, 30)
+                    glow_col = (255, 170, 55)
+                    brace_col = (28, 16, 16)
+                else:  # 888
+                    slab_col = (65, 54, 44)
+                    edge_col = (145, 115, 78)
+                    glow_col = (205, 180, 135)
+                    brace_col = (42, 34, 28)
+
+                # Support bracket pillars
+                p1_x = rx + max(12, rw // 6)
+                p2_x = rx + min(rw - 24, rw * 5 // 6 - 12)
+                pygame.draw.polygon(self.screen, brace_col, [(p1_x, ry + rh), (p1_x + 6, ry + rh + 12), (p1_x + 12, ry + rh)])
+                pygame.draw.polygon(self.screen, brace_col, [(p2_x, ry + rh), (p2_x + 6, ry + rh + 12), (p2_x + 12, ry + rh)])
+
+                # Platform block with rounded corners
+                plat_rect = pygame.Rect(rx, ry, rw, rh)
+                pygame.draw.rect(self.screen, slab_col, plat_rect, border_radius=4)
+                pygame.draw.line(self.screen, (max(0, slab_col[0] - 10), max(0, slab_col[1] - 10), max(0, slab_col[2] - 10)), (rx + 2, ry + rh - 1), (rx + rw - 3, ry + rh - 1), 2)
+                pygame.draw.line(self.screen, edge_col, (rx + 2, ry + 1), (rx + rw - 3, ry + 1), 3)
+                pygame.draw.line(self.screen, glow_col, (rx + 6, ry), (rx + rw - 7, ry), 1)
+
     def draw_player(self, p, camera):
         facing = getattr(p, "attack_facing", p.facing) if p.attack_active else p.facing
+        platforms = self.get_stage_platforms()
+        if p.visual and hasattr(p.visual, "shadow_metrics"):
+            off_x, shadow_base_w = p.visual.shadow_metrics(facing)
+        else:
+            off_x, shadow_base_w = (0.0, 44)
+        draw_ground_shadow(
+            self.screen,
+            p.rect.centerx + off_x,
+            p.rect.bottom,
+            platforms,
+            shadow_base_w,
+            11,
+            camera,
+            current_platform=getattr(p, "current_platform", None),
+        )
+
         if p.visual and p.visual.draw(self.screen, p.rect.centerx - camera, p.rect.bottom, facing):
             return
         x = round(p.rect.x - camera)
         y = p.rect.y
         if p.invincible > 0 and int(p.invincible * 18) % 2 == 0:
             return
-        pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 7, 58, 14))
         pygame.draw.rect(self.screen, (48, 75, 151), (x + 5, y + 27, 32, 37), border_radius=8)
         pygame.draw.polygon(self.screen, (184, 207, 255), [(x + 9, y + 26), (x + 22, y + 6), (x + 35, y + 26)])
         pygame.draw.circle(self.screen, (238, 203, 162), (x + 22, y + 17), 12)
@@ -2249,13 +2581,148 @@ class Game:
             sx = box.x - camera
             pygame.draw.arc(self.screen, (244, 222, 137), (sx, box.y - 5, box.width, box.height + 10), 0.2, 2.9, 5)
 
-    def draw_bar(self, x, y, width, value, maximum, color, label):
-        pygame.draw.rect(self.screen, (15, 18, 28), (x - 1, y - 1, width + 2, 15), border_radius=4)
-        pygame.draw.rect(self.screen, (65, 68, 78), (x, y, width, 13), border_radius=3)
-        fill = round(width * max(0, value) / maximum) if maximum else 0
-        if fill:
-            pygame.draw.rect(self.screen, color, (x, y, fill, 13), border_radius=3)
-        self.screen.blit(self.font.render(label, True, WHITE), (x + width + 8, y - 5))
+    def _ensure_ui_systems(self):
+        """Lazily initialize HUD/Bag subsystems so Game.__new__ in tests works safely."""
+        if not hasattr(self, "inventory"):
+            self.inventory = InventoryState()
+        if not hasattr(self, "hud"):
+            self.hud = OriginalHUD()
+        if not hasattr(self, "bag_modal"):
+            self.bag_modal = InventoryBagModal()
+        if not hasattr(self, "hud_hitboxes"):
+            self.hud_hitboxes = {}
+        if not hasattr(self, "_hud_toast_msg"):
+            self._hud_toast_msg = ""
+        if not hasattr(self, "_hud_toast_timer"):
+            self._hud_toast_timer = 0.0
+        if not hasattr(self, "_last_dt"):
+            self._last_dt = 1.0 / FPS
+        lobby = getattr(self, "lobby", None)
+        if lobby is not None:
+            self.inventory.sync_from_lobby(lobby)
+        self.inventory.kill_count = int(getattr(self, "total_kills", 0))
+
+    def _hud_font_map(self):
+        small = getattr(self, "font", None)
+        mid = getattr(self, "ui_font", small)
+        big = getattr(self, "big_font", mid or small)
+        return {11: small, 12: small, 13: small, 14: mid, 16: mid, 18: big}
+
+    def _show_hud_toast(self, message: str, duration: float = 2.0):
+        self._ensure_ui_systems()
+        current_state = getattr(self, "game_state", "PLAYING")
+        if current_state == "LOBBY" and hasattr(self, "lobby") and self.lobby:
+            self.lobby.show_toast(message, duration)
+        else:
+            self._hud_toast_msg = message
+            self._hud_toast_timer = duration
+
+    def toggle_bag(self):
+        self._ensure_ui_systems()
+        self.bag_modal.is_open = not self.bag_modal.is_open
+        if self.bag_modal.is_open and hasattr(self, "lobby") and self.lobby:
+            if getattr(self.lobby, "active_modal", None) is not None:
+                self.lobby.active_modal = None
+
+    def _use_quick_item(self, slot_index: int) -> bool:
+        self._ensure_ui_systems()
+        player = getattr(self, "player", None)
+        if player is None:
+            return False
+        lobby = getattr(self, "lobby", None)
+        return self.inventory.use_quick_slot(
+            slot_index, player, lobby=lobby, show_toast=self._show_hud_toast
+        )
+
+    def _trigger_skill_slot(self, slot_index: int) -> bool:
+        p = getattr(self, "player", None)
+        if not p or slot_index < 0 or slot_index >= 4:
+            return False
+        skill_kind = f"skill{slot_index + 1}"
+        if p.attack(requested_kind=skill_kind) and (not p.visual or not p.visual.available):
+            self.resolve_player_attack()
+            return True
+        return False
+
+    def _tick_hud_ui(self, dt: float):
+        self._ensure_ui_systems()
+        self._last_dt = dt
+        self.inventory.update(dt, getattr(self, "player", None))
+        if self._hud_toast_timer > 0.0:
+            self._hud_toast_timer = max(0.0, self._hud_toast_timer - dt)
+
+    def _draw_bag_player_preview(self, surface: pygame.Surface, bottom_center: tuple[int, int]):
+        p = getattr(self, "player", None)
+        vis = getattr(p, "visual", None) if p else None
+        if vis and getattr(vis, "available", False):
+            prev_action = vis.action
+            prev_frame = vis.frame
+            if "站" in vis.actions:
+                vis.frame = vis.actions["站"][0]
+            vis.draw(surface, bottom_center[0], bottom_center[1], facing=1)
+            vis.action = prev_action
+            vis.frame = prev_frame
+
+    def _draw_hud_toast(self):
+        if getattr(self, "_hud_toast_timer", 0.0) <= 0.0 or not getattr(self, "_hud_toast_msg", ""):
+            return
+        font = getattr(self, "ui_font", getattr(self, "font", None))
+        if font is None:
+            return
+        tw, th = font.size(self._hud_toast_msg)
+        box = pygame.Rect(0, 0, tw + 30, th + 14)
+        box.center = (WIDTH // 2, 44 if self.bag_modal.is_open else 108)
+        surf = pygame.Surface(box.size, pygame.SRCALPHA)
+        surf.fill((22, 16, 18, 228))
+        self.screen.blit(surf, box.topleft)
+        pygame.draw.rect(self.screen, (235, 185, 85), box, 1, border_radius=8)
+        _safe_crisp_text(self.screen, self._hud_toast_msg, font, box.center, (255, 232, 165), centered=True)
+
+    def _handle_hud_and_bag_click(self, pos: tuple[int, int], button: int) -> bool:
+        self._ensure_ui_systems()
+        current_state = getattr(self, "game_state", "PLAYING")
+        if current_state not in ("LOBBY", "PLAYING"):
+            return False
+        lobby = getattr(self, "lobby", None)
+
+        if self.bag_modal.is_open:
+            action = self.bag_modal.handle_click(
+                pos,
+                button,
+                getattr(self, "player", None),
+                self.inventory,
+                self.hud_hitboxes,
+                lobby=lobby,
+                show_toast=self._show_hud_toast,
+            )
+            return action is not None or True
+
+        if button != 1 or current_state != "PLAYING":
+            return False
+
+        if self.hud_hitboxes.get("dock_bag") and self.hud_hitboxes["dock_bag"].collidepoint(pos):
+            self.toggle_bag()
+            return True
+        if self.hud_hitboxes.get("dock_sys") and self.hud_hitboxes["dock_sys"].collidepoint(pos):
+            self.game_state = "PAUSED"
+            return True
+        if self.hud_hitboxes.get("dock_pet") and self.hud_hitboxes["dock_pet"].collidepoint(pos):
+            self._show_hud_toast("宠物伙伴可在城镇休息区中查看")
+            return True
+        if self.hud_hitboxes.get("dock_shop") and self.hud_hitboxes["dock_shop"].collidepoint(pos):
+            self._show_hud_toast("返回城镇找妮蒂亚 / 装备商人可购买补给与神兵")
+            return True
+        for i in range(3):
+            r = self.hud_hitboxes.get(f"hud_item_{i}")
+            if r and r.collidepoint(pos):
+                self._use_quick_item(i)
+                return True
+        for i in range(4):
+            r = self.hud_hitboxes.get(f"hud_skill_{i}")
+            if r and r.collidepoint(pos):
+                self._trigger_skill_slot(i)
+                return True
+        return False
 
     def draw(self):
         current_state = getattr(self, "game_state", "PLAYING")
@@ -2278,18 +2745,37 @@ class Game:
             self._render_stage_canvas(canvas)
             return
         if current_state == "LOBBY" and hasattr(self, "lobby"):
+            self._ensure_ui_systems()
             self.lobby.draw(self.screen, draw_player_fn=lambda cam: self.draw_player(self.player, cam))
+            mpos = pygame.mouse.get_pos()
+            if self.bag_modal.is_open:
+                self.bag_modal.draw(
+                    self.screen,
+                    getattr(self, "player", None),
+                    self.inventory,
+                    self.hud_hitboxes,
+                    self._hud_font_map(),
+                    mpos,
+                    preview_draw_fn=self._draw_bag_player_preview,
+                )
             if self.show_hitboxes:
-                self.draw_ui_hitboxes_overlay(self.screen, self.lobby.hitboxes, pygame.mouse.get_pos())
-            self._draw_hitbox_pill()
+                overlay_boxes = dict(self.lobby.hitboxes)
+                if self.bag_modal.is_open:
+                    overlay_boxes.update(self.hud_hitboxes)
+                self.draw_ui_hitboxes_overlay(self.screen, overlay_boxes, mpos)
+            if not self.bag_modal.is_open:
+                self._draw_hitbox_pill()
             pygame.display.flip()
             return
 
         self.menu_hitboxes.clear()
 
         p = self.player
-        camera = clamp(p.rect.centerx - WIDTH // 2, 0, WORLD_WIDTH - WIDTH)
+        w_width = self.get_world_width()
+        camera = clamp(p.rect.centerx - WIDTH // 2, 0, w_width - WIDTH)
         self.draw_background(camera)
+        self.draw_platforms(camera)
+        platforms = self.get_stage_platforms()
 
         if getattr(self, "current_level", 1) != 888:
             for landmark in (400, 1150, 1950, 2450):
@@ -2320,8 +2806,8 @@ class Game:
             and getattr(self, "door_frames", None)
         ):
             door_img = self.door_frames[self.door_frame_index % len(self.door_frames)]
-            door_x = 1468
-            door_y = GROUND_Y - door_img.get_height()
+            door_x = 1321
+            door_y = 400 - door_img.get_height()
             screen_door_x = round(door_x - camera - door_img.get_width() // 2)
             if -200 < screen_door_x < WIDTH + 200:
                 glow_val = int(128 + 100 * math.sin(pygame.time.get_ticks() / 250.0))
@@ -2329,7 +2815,7 @@ class Game:
                 pygame.draw.ellipse(glow_surf, (100, 255, 180, max(0, min(255, glow_val // 3))), glow_surf.get_rect())
                 self.screen.blit(glow_surf, (screen_door_x - 20, door_y - 20))
                 self.screen.blit(door_img, (screen_door_x, door_y))
-                is_near = abs(p.rect.centerx - 1468) <= 80
+                is_near = abs(p.rect.centerx - 1321) <= 80 or p.rect.centerx >= 1300 or abs(p.rect.centerx - 1468) <= 80
                 if is_near:
                     prompt_rect = pygame.Rect(screen_door_x - 18, door_y - 36, door_img.get_width() + 36, 28)
                     pygame.draw.rect(self.screen, (24, 38, 28, 230), prompt_rect, border_radius=6)
@@ -2341,6 +2827,8 @@ class Game:
                     self.screen.blit(door_txt, door_txt.get_rect(center=(screen_door_x + door_img.get_width() // 2, door_y - 18)))
 
         for enemy in self.enemies:
+            if getattr(enemy, "is_removed", False):
+                continue
             x, y = round(enemy.rect.x - camera), enemy.rect.y
             dummy_id = None
             if enemy.name.startswith("教学怪"):
@@ -2348,43 +2836,161 @@ class Game:
                     if str(did) in enemy.name:
                         dummy_id = did
                         break
-            if dummy_id and dummy_id in getattr(self, "dummy_frames", {}):
-                frame_img = self.dummy_frames[dummy_id]
-                scaled_dummy = frame_img
+
+            # Try to get active animated sprite from MonsterVisual
+            anim_surf = None
+            if hasattr(enemy, "visual") and enemy.visual:
+                anim_surf = enemy.visual.get_surface(enemy.facing)
+            elif dummy_id and dummy_id in getattr(self, "dummy_frames", {}):
+                anim_surf = self.dummy_frames[dummy_id]
                 if enemy.facing > 0:
-                    scaled_dummy = pygame.transform.flip(scaled_dummy, True, False)
-                dw, dh = scaled_dummy.get_size()
-                pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 6, enemy.w + 16, 12))
-                dx = round(enemy.rect.centerx - camera - dw // 2)
-                dy = GROUND_Y - dh
-                self.screen.blit(scaled_dummy, (dx, dy))
-                if enemy.flash > 0:
-                    flash_surf = pygame.Surface((dw, dh), pygame.SRCALPHA)
-                    flash_surf.fill((255, 255, 255, 130))
-                    self.screen.blit(flash_surf, (dx, dy), special_flags=pygame.BLEND_RGBA_ADD)
-                pygame.draw.rect(self.screen, (36, 25, 33), (x, dy - 10, enemy.w, 5), border_radius=2)
-                pygame.draw.rect(self.screen, (225, 55, 55), (x, dy - 10, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 5), border_radius=2)
-                name_txt = self.font.render(enemy.name.split(" ")[0], True, (255, 220, 160))
-                self.screen.blit(name_txt, (x - 4, dy - 28))
+                    anim_surf = pygame.transform.flip(anim_surf, True, False)
+
+            is_cyclops2 = "独眼怪2" in enemy.name
+            is_cyclops = "独眼怪" in enemy.name
+            is_umbrella = "雨伞" in enemy.name
+            hover_y = math.sin(pygame.time.get_ticks() * 0.006) * 3 if is_umbrella else 0.0
+
+            if anim_surf is not None:
+                shadow_w = max(38, enemy.w + (14 if enemy.kind == 2 else 8))
+                shadow_h = 13 if enemy.kind == 2 else 11
+                shadow_bottom = enemy.rect.bottom
             elif enemy.kind == 2:
-                color = (255, 235, 230) if enemy.flash else ((195, 45, 45) if getattr(self, "current_level", 1) == 2 else (165, 55, 105))
-                pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 12, GROUND_Y - 8, enemy.w + 24, 16))
-                pygame.draw.rect(self.screen, color, (x, y + 16, enemy.w, enemy.h - 16), border_radius=14)
-                pygame.draw.polygon(self.screen, (245, 190, 50), [(x + 8, y + 16), (x + enemy.w // 2, y - 6), (x + enemy.w - 8, y + 16)])
-                pygame.draw.circle(self.screen, (235, 195, 150), (x + enemy.w // 2, y + 16), 22)
-                eye = x + enemy.w // 2 + enemy.facing * 8
-                pygame.draw.circle(self.screen, (255, 40, 40), (eye, y + 16), 4)
-                pygame.draw.rect(self.screen, (36, 25, 33), (x, y - 14, enemy.w, 6), border_radius=2)
-                pygame.draw.rect(self.screen, (225, 45, 45), (x, y - 14, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 6), border_radius=2)
+                shadow_w = enemy.w + 16
+                shadow_h = 13
+                shadow_bottom = enemy.rect.bottom
+            elif is_umbrella:
+                shadow_w = max(36, enemy.w + 6)
+                shadow_h = 10
+                shadow_bottom = enemy.rect.bottom - (10 - hover_y)
             else:
-                color = (255, 220, 215) if enemy.flash else ((172, 75, 71) if enemy.kind == 0 else (109, 63, 135))
-                pygame.draw.ellipse(self.screen, (13, 16, 26), (x - 8, GROUND_Y - 6, enemy.w + 16, 12))
-                pygame.draw.rect(self.screen, color, (x, y + 12, enemy.w, enemy.h - 12), border_radius=12)
-                pygame.draw.circle(self.screen, (221, 190, 152), (x + enemy.w // 2, y + 13), 14 if enemy.kind == 0 else 18)
-                eye = x + enemy.w // 2 + enemy.facing * 5
-                pygame.draw.circle(self.screen, (255, 226, 119), (eye, y + 13), 3)
-                pygame.draw.rect(self.screen, (36, 25, 33), (x, y - 8, enemy.w, 5), border_radius=2)
-                pygame.draw.rect(self.screen, (209, 69, 75), (x, y - 8, round(enemy.w * max(0, enemy.hp) / enemy.max_hp), 5), border_radius=2)
+                shadow_w = max(36, enemy.w + 8)
+                shadow_h = 11
+                shadow_bottom = enemy.rect.bottom
+
+            draw_ground_shadow(
+                self.screen,
+                enemy.rect.centerx,
+                shadow_bottom,
+                platforms,
+                shadow_w,
+                shadow_h,
+                camera,
+                current_platform=getattr(enemy, "current_platform", None),
+            )
+
+            if anim_surf is not None:
+                dw, dh = anim_surf.get_size()
+                # Sprite positioned with bottom aligned to entity bottom (tracks launch/ground!)
+                dx = round(enemy.rect.centerx - camera - dw // 2)
+                dy = round(enemy.rect.bottom - dh)
+                self.screen.blit(anim_surf, (dx, dy))
+
+                if enemy.flash > 0:
+                    mask = pygame.mask.from_surface(anim_surf)
+                    sil = mask.to_surface(setcolor=(255, 255, 255, 210), unsetcolor=(0, 0, 0, 0))
+                    self.screen.blit(sil, (dx, dy), special_flags=pygame.BLEND_RGBA_ADD)
+
+                if not getattr(enemy, "is_dead", False):
+                    self._ensure_ui_systems()
+                    self.hud.draw_enemy_hp(self.screen, enemy, camera, dy, self.font)
+            elif enemy.kind == 2:
+                # Boss 长脖怪 (长脖子女妖)
+                boss_portrait = getattr(self, "boss2_portrait", None)
+                if boss_portrait is None:
+                    p_path = Path("python_assets/enemies/boss2_portrait.png")
+                    if p_path.is_file():
+                        try:
+                            self.boss2_portrait = pygame.image.load(str(p_path))
+                            boss_portrait = self.boss2_portrait
+                        except Exception:
+                            pass
+
+                body_col = (215, 68, 68) if enemy.flash else ((175, 38, 48) if getattr(self, "current_level", 1) == 2 else (145, 48, 95))
+                # Serpentine body & neck
+                neck_rect = (x + enemy.w // 2 - 12, y + 26, 24, enemy.h - 26)
+                pygame.draw.rect(self.screen, body_col, neck_rect, border_radius=10)
+                base_rect = (x + 4, y + enemy.h - 34, enemy.w - 8, 32)
+                pygame.draw.rect(self.screen, body_col, base_rect, border_radius=14)
+                pygame.draw.ellipse(self.screen, (245, 180, 50), (x + 10, y + enemy.h - 22, enemy.w - 20, 16))
+
+                # Head: official portrait or crowned head
+                if boss_portrait:
+                    p_surf = boss_portrait
+                    if enemy.facing > 0:
+                        p_surf = pygame.transform.flip(p_surf, True, False)
+                    px = round(x + enemy.w // 2 - p_surf.get_width() // 2)
+                    py = round(y - 8)
+                    self.screen.blit(p_surf, (px, py))
+                    if enemy.flash > 0:
+                        p_mask = pygame.mask.from_surface(p_surf)
+                        p_sil = p_mask.to_surface(setcolor=(255, 255, 255, 200), unsetcolor=(0, 0, 0, 0))
+                        self.screen.blit(p_sil, (px, py), special_flags=pygame.BLEND_RGBA_ADD)
+                else:
+                    pygame.draw.circle(self.screen, (235, 195, 150), (x + enemy.w // 2, y + 16), 22)
+                    eye = x + enemy.w // 2 + enemy.facing * 8
+                    pygame.draw.circle(self.screen, (255, 40, 40), (eye, y + 16), 4)
+
+                if enemy.flash > 0:
+                    pygame.draw.rect(self.screen, (255, 255, 255), (x + 2, y + enemy.h - 36, enemy.w - 4, 36), 2, border_radius=14)
+
+                if not getattr(enemy, "is_dead", False):
+                    self._ensure_ui_systems()
+                    self.hud.draw_enemy_hp(self.screen, enemy, camera, y - 4, self.font)
+            else:
+                if is_umbrella:
+                    # 雨伞怪: umbrella dome and floating hover eye
+                    uy = y + hover_y
+                    canopy_col = (225, 85, 85) if enemy.flash else (185, 42, 42)
+                    # Umbrella top
+                    pygame.draw.ellipse(self.screen, canopy_col, (x - 2, uy + 6, enemy.w + 4, 28))
+                    # Golden rim
+                    pygame.draw.arc(self.screen, (245, 195, 60), (x - 2, uy + 6, enemy.w + 4, 28), 3.14159, 6.28318, 3)
+                    # Shaded underside
+                    pygame.draw.ellipse(self.screen, (32, 18, 24), (x + 3, uy + 20, enemy.w - 6, 22))
+                    # Eye beneath
+                    eye_x = x + enemy.w // 2 + enemy.facing * 4
+                    eye_y = uy + 28
+                    pygame.draw.circle(self.screen, (255, 230, 80), (round(eye_x), round(eye_y)), 4)
+                    pygame.draw.circle(self.screen, (20, 10, 10), (round(eye_x + enemy.facing), round(eye_y)), 2)
+                    # Tassels
+                    for tx in (x + 8, x + enemy.w // 2, x + enemy.w - 8):
+                        pygame.draw.line(self.screen, (160, 35, 35), (tx, uy + 26), (tx, uy + 42), 2)
+                elif is_cyclops or is_cyclops2:
+                    # 独眼怪 / 独眼怪2
+                    if is_cyclops2:
+                        body_col = (195, 78, 78) if enemy.flash else (145, 38, 38)
+                        horn_col = (235, 160, 40)
+                        iris_col = (255, 175, 0)
+                    else:
+                        body_col = (145, 88, 175) if enemy.flash else (95, 48, 125)
+                        horn_col = (65, 30, 85)
+                        iris_col = (220, 30, 30)
+
+                    # Horned demon body
+                    pygame.draw.rect(self.screen, body_col, (x, y + 14, enemy.w, enemy.h - 14), border_radius=12)
+                    # Horns
+                    pygame.draw.polygon(self.screen, horn_col, [(x + 8, y + 16), (x + 2, y - 2), (x + 18, y + 14)])
+                    pygame.draw.polygon(self.screen, horn_col, [(x + enemy.w - 8, y + 16), (x + enemy.w - 2, y - 2), (x + enemy.w - 18, y + 14)])
+                    # Giant Cyclops eye
+                    eye_center = (round(x + enemy.w // 2 + enemy.facing * 4), round(y + 32))
+                    pygame.draw.ellipse(self.screen, (240, 240, 245), (eye_center[0] - 12, eye_center[1] - 10, 24, 20))
+                    pygame.draw.circle(self.screen, iris_col, eye_center, 7)
+                    pygame.draw.circle(self.screen, (20, 10, 10), (eye_center[0] + enemy.facing * 2, eye_center[1]), 3)
+                else:
+                    # Generic small enemy fallback
+                    body_col = (215, 105, 105) if enemy.flash else ((165, 65, 65) if enemy.kind == 0 else (105, 55, 125))
+                    pygame.draw.rect(self.screen, body_col, (x, y + 12, enemy.w, enemy.h - 12), border_radius=12)
+                    pygame.draw.circle(self.screen, (221, 190, 152), (x + enemy.w // 2, y + 13), 14 if enemy.kind == 0 else 18)
+                    eye = x + enemy.w // 2 + enemy.facing * 5
+                    pygame.draw.circle(self.screen, (255, 226, 119), (eye, y + 13), 3)
+
+                if enemy.flash > 0:
+                    pygame.draw.rect(self.screen, (255, 255, 255), (x, y + 12, enemy.w, enemy.h - 12), 2, border_radius=12)
+
+                if not getattr(enemy, "is_dead", False):
+                    self._ensure_ui_systems()
+                    self.hud.draw_enemy_hp(self.screen, enemy, camera, y + 2, self.font)
 
         self.draw_player(p, camera)
         for bolt in self.bolts:
@@ -2397,68 +3003,58 @@ class Game:
             shake_y = -self.shake_intensity if (int(self.shake_timer * 30) % 2 == 0) else self.shake_intensity
             self.screen.scroll(0, shake_y)
 
-        self.draw_bar(22, 22, 215, p.hp, p.max_hp, (204, 65, 75), f"HP {p.hp}/{p.max_hp}")
-        self.draw_bar(22, 47, 215, p.mp, p.max_mp, (65, 141, 220), f"MP {p.mp}/{p.max_mp}")
-        self.screen.blit(self.font.render(f"Lv.{p.level}   EXP {p.xp}/{p.level * 100}   得分 {p.score}", True, WHITE), (22, 76))
-
+        self._ensure_ui_systems()
+        mpos = pygame.mouse.get_pos()
         lvl = getattr(self, "current_level", 1)
+        self.hud.draw_battle_hud(
+            self.screen,
+            p,
+            self.enemies,
+            self.inventory,
+            self.hud_hitboxes,
+            self._hud_font_map(),
+            dt=getattr(self, "_last_dt", 1.0 / FPS),
+            mouse_pos=mpos,
+            bag_open=self.bag_modal.is_open,
+        )
+
         if lvl == 888:
-            lvl_txt = f"新手指导 · 第 {self.wave}/4 阶段"
-            bar_rect = pygame.Rect(WIDTH // 2 - 380, 8, 760, 52)
+            bar_rect = pygame.Rect(352, 8, 444, 54)
             pygame.draw.rect(self.screen, (34, 22, 26), bar_rect, border_radius=8)
             pygame.draw.rect(self.screen, (225, 165, 75), bar_rect, 2, border_radius=8)
             guide_texts = {
-                1: "【教学 1/4 · 基础攻击】按 [A] [D] 移动，按 [K] 跳跃，按 [J] 连续普攻！",
-                2: "【教学 2/4 · 技能浮空】按 [W + J] 升龙挑起，按 [S + J] 下劈震地！",
-                3: "【教学 3/4 · 冲刺与切武器】双击方向冲斩；按 [L] 切换主副手武器！",
-                4: "【教学 4/4 · 毕业考核】综合运用全部连招，击破终极试炼靶怪！",
+                1: "【教学 1/4】A/D 移动，K 跳跃，J 普攻连招！",
+                2: "【教学 2/4】W+J 升龙挑飞，S+J 下劈震地！",
+                3: "【教学 3/4】双击方向冲刺；L 换武器 / B 开背包！",
+                4: "【教学 4/4】综合连招击破终极试炼靶怪！",
             }
             gtxt = guide_texts.get(self.wave, "击破试炼木桩完成练习！")
             ts = self.font.render(gtxt, True, (255, 230, 160))
-            self.screen.blit(ts, ts.get_rect(center=(WIDTH // 2, 22)))
+            self.screen.blit(ts, ts.get_rect(center=(bar_rect.centerx, 22)))
             skip_hint = self.font.render("按 [P] 或 [Esc] 跳过教学", True, (210, 200, 190))
-            self.screen.blit(skip_hint, skip_hint.get_rect(center=(WIDTH // 2, 44)))
+            self.screen.blit(skip_hint, skip_hint.get_rect(center=(bar_rect.centerx, 44)))
+            score_surf = self.font.render(f"得分 {p.score}", True, (235, 224, 196))
+            self.screen.blit(score_surf, (WIDTH - score_surf.get_width() - 14, 46))
         else:
             lvl_txt = f"关卡 {lvl}/2 · 第 {self.wave}/3 波"
-            self.screen.blit(self.ui_font.render(lvl_txt, True, (255, 235, 150)), (WIDTH - 330, 18))
+            lvl_surf = self.font.render(lvl_txt, True, (255, 235, 150))
+            self.screen.blit(lvl_surf, (WIDTH - lvl_surf.get_width() - 14, 46))
+            score_surf = self.font.render(f"得分 {p.score}", True, (235, 224, 196))
+            self.screen.blit(score_surf, (WIDTH - score_surf.get_width() - 14, 70))
 
-        boss = next((e for e in self.enemies if getattr(e, "kind", 0) == 2 and e.hp > 0), None)
-        if boss is not None:
-            bar_w, bar_h = 440, 20
-            bx, by = (WIDTH - bar_w) // 2, 24
-            pygame.draw.rect(self.screen, (20, 15, 25), (bx - 3, by - 3, bar_w + 6, bar_h + 6), border_radius=6)
-            pygame.draw.rect(self.screen, (55, 30, 35), (bx, by, bar_w, bar_h), border_radius=4)
-            b_fill = round(bar_w * max(0, boss.hp) / boss.max_hp)
-            if b_fill > 0:
-                b_col = (225, 60, 55) if lvl == 2 else (210, 60, 120)
-                pygame.draw.rect(self.screen, b_col, (bx, by, b_fill, bar_h), border_radius=4)
-                pygame.draw.rect(self.screen, (255, 160, 170), (bx, by + 2, b_fill, 4), border_radius=2)
-            pygame.draw.rect(self.screen, (240, 195, 80), (bx - 1, by - 1, bar_w + 2, bar_h + 2), 2, border_radius=4)
-            b_title = f"{boss.name}   HP {max(0, boss.hp)} / {boss.max_hp}"
-            b_txt_surf = self.ui_font.render(b_title, True, (255, 245, 220))
-            self.screen.blit(b_txt_surf, b_txt_surf.get_rect(center=(WIDTH // 2, by - 14)))
+        if self.bag_modal.is_open:
+            self.bag_modal.draw(
+                self.screen,
+                p,
+                self.inventory,
+                self.hud_hitboxes,
+                self._hud_font_map(),
+                mpos,
+                preview_draw_fn=self._draw_bag_player_preview,
+            )
+        self._draw_hud_toast()
 
-        skill_keys = [
-            ("H", "魔光闪", "a8"),
-            ("U", "断空追击", "a9"),
-            ("I", "风切", "a10"),
-            ("O", "皇龙斩", "a11"),
-        ]
-        hud_skill_x = WIDTH - 390
-        for i, (k_name, s_name, s_type) in enumerate(skill_keys):
-            cd = p.skill_cooldowns.get(s_type, 0)
-            if cd > 0:
-                txt = f"{k_name}: {cd:.1f}s"
-                col = (170, 175, 185)
-            else:
-                txt = f"{k_name}: {s_name}"
-                col = (105, 235, 135)
-            self.screen.blit(self.font.render(txt, True, col), (hud_skill_x + i * 95, 52))
-
-        controls = "双击 A/D 冲刺   J 攻击   K 跳跃   H/U/I/O 技能1-4   L 换剑   C 换装   Esc 暂停   F3 HITBOXES"
-        self.screen.blit(self.font.render(controls, True, (205, 216, 231)), (22, HEIGHT - 30))
-
-        if getattr(self, "level_banner_timer", 0) > 0:
+        if not self.bag_modal.is_open and getattr(self, "level_banner_timer", 0) > 0:
             alpha = max(0, min(255, int(255 * (self.level_banner_timer / 0.5 if self.level_banner_timer < 0.5 else 1.0))))
             banner_surf = pygame.Surface((WIDTH, 84), pygame.SRCALPHA)
             banner_surf.fill((12, 16, 28, int(alpha * 0.85)))
@@ -2469,7 +3065,7 @@ class Game:
             elif lvl == 1:
                 sub = "消灭全部敌人，突破传送门！"
             else:
-                sub = "迎战最终决战，击溃烈焰暴君！"
+                sub = f"迎战最终决战，击溃【{stage_info.boss}】！"
             t1 = self.big_font.render(level_name, True, (255, 225, 90))
             t2 = self.font.render(sub, True, (210, 230, 250))
             t1.set_alpha(alpha)
@@ -2477,7 +3073,7 @@ class Game:
             banner_surf.blit(t1, t1.get_rect(center=(WIDTH // 2, 28)))
             banner_surf.blit(t2, t2.get_rect(center=(WIDTH // 2, 62)))
             self.screen.blit(banner_surf, (0, 130))
-        elif getattr(self, "wave_banner_timer", 0) > 0 and getattr(self, "wave_banner_text", ""):
+        elif not self.bag_modal.is_open and getattr(self, "wave_banner_timer", 0) > 0 and getattr(self, "wave_banner_text", ""):
             alpha = max(0, min(255, int(255 * (self.wave_banner_timer / 0.4 if self.wave_banner_timer < 0.4 else 1.0))))
             wave_surf = pygame.Surface((WIDTH, 44), pygame.SRCALPHA)
             wave_surf.fill((20, 24, 38, int(alpha * 0.78)))
@@ -2502,14 +3098,23 @@ class Game:
             reward = self.font.render("通关奖励：生命与魔法已恢复 50%", True, (110, 245, 140))
             self.screen.blit(reward, reward.get_rect(center=(WIDTH // 2, banner_rect.top + 138)))
 
-            # Interactive button for advancing to next stage
-            btn_rect = pygame.Rect(banner_rect.centerx - 220, banner_rect.top + 168, 440, 38)
-            hovered = btn_rect.collidepoint(pygame.mouse.get_pos())
-            self.menu_hitboxes["btn_levelclear_next"] = btn_rect
-            pygame.draw.rect(self.screen, (70, 52, 20) if hovered else (45, 34, 18), btn_rect, border_radius=8)
-            pygame.draw.rect(self.screen, (255, 225, 120) if hovered else (190, 145, 65), btn_rect, 2 if hovered else 1, border_radius=8)
-            prompt = self.font.render("【 点击或按 J / 空格 / 回车 进入第 2 关 】", True, (255, 240, 160) if hovered else (255, 215, 90))
-            self.screen.blit(prompt, prompt.get_rect(center=btn_rect.center))
+            # Interactive buttons for advancing or returning to town
+            mpos = pygame.mouse.get_pos()
+            btn_rect = pygame.Rect(banner_rect.centerx - 260, banner_rect.top + 168, 245, 38)
+            hovered_next = btn_rect.collidepoint(mpos)
+            self.menu_hitboxes["btn_levelclear_next"] = ContentHitbox(btn_rect, border_radius=8, tag="btn_levelclear_next")
+            pygame.draw.rect(self.screen, (70, 52, 20) if hovered_next else (45, 34, 18), btn_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (255, 225, 120) if hovered_next else (190, 145, 65), btn_rect, 2 if hovered_next else 1, border_radius=8)
+            prompt_next = self.font.render("【 进入第 2 关 (J / 空格) 】", True, (255, 240, 160) if hovered_next else (255, 215, 90))
+            self.screen.blit(prompt_next, prompt_next.get_rect(center=btn_rect.center))
+
+            btn_rect_lobby = pygame.Rect(banner_rect.centerx + 15, banner_rect.top + 168, 245, 38)
+            hovered_lobby = btn_rect_lobby.collidepoint(mpos)
+            self.menu_hitboxes["btn_levelclear_lobby"] = ContentHitbox(btn_rect_lobby, border_radius=8, tag="btn_levelclear_lobby")
+            pygame.draw.rect(self.screen, (26, 52, 70) if hovered_lobby else (20, 36, 52), btn_rect_lobby, border_radius=8)
+            pygame.draw.rect(self.screen, (130, 215, 255) if hovered_lobby else (80, 150, 190), btn_rect_lobby, 2 if hovered_lobby else 1, border_radius=8)
+            prompt_lobby = self.font.render("【 返回城镇 (W / T) 】", True, (210, 245, 255) if hovered_lobby else (170, 215, 240))
+            self.screen.blit(prompt_lobby, prompt_lobby.get_rect(center=btn_rect_lobby.center))
 
         elif current_state == "VICTORY":
             veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -2521,7 +3126,7 @@ class Game:
             full_run = self.starting_level == 1
             title = self.big_font.render("期末项目演示 · 全关卡达成！" if full_run else "烈焰殿堂 · 挑战达成！", True, (255, 225, 90))
             self.screen.blit(title, title.get_rect(center=(WIDTH // 2, box_rect.top + 50)))
-            result = "恭喜勇士！你已成功击溃【烈焰暴君】，通关全部2个关卡！" if full_run else "你击败了烈焰暴君，完成了第 2 关！"
+            result = f"恭喜勇士！你已成功击溃【{STAGES[2].boss}】，通关全部2个关卡！" if full_run else f"你击败了【{STAGES[2].boss}】，完成了第 2 关！"
             subtitle = self.ui_font.render(result, True, WHITE)
             self.screen.blit(subtitle, subtitle.get_rect(center=(WIDTH // 2, box_rect.top + 102)))
             stats = self.ui_font.render(f"最终等级: Lv.{p.level}   总得分: {p.score}   总斩敌: {self.total_kills}", True, (140, 240, 180))
@@ -2529,14 +3134,14 @@ class Game:
 
             options = [
                 ("btn_victory_restart", f"【R】 重战第 {self.starting_level} 关", (255, 220, 120)),
-                ("btn_victory_lobby", "【T】 返回城镇大厅", (255, 235, 170)),
+                ("btn_victory_lobby", "【T / W】 返回城镇大厅", (255, 235, 170)),
                 ("btn_victory_menu", "【Esc】 返回主界面", (200, 215, 235)),
             ]
             mpos = pygame.mouse.get_pos()
             for idx, (btn_name, opt_text, col) in enumerate(options):
                 btn_rect = pygame.Rect(box_rect.left + 30 + idx * 205, box_rect.top + 215, 190, 46)
                 hovered = btn_rect.collidepoint(mpos)
-                self.menu_hitboxes[btn_name] = btn_rect
+                self.menu_hitboxes[btn_name] = ContentHitbox(btn_rect, border_radius=8, tag=btn_name)
                 bg_color = (68, 52, 92) if hovered else (44, 32, 60)
                 border_color = (255, 220, 110) if hovered else (160, 120, 200)
                 pygame.draw.rect(self.screen, bg_color, btn_rect, border_radius=8)
@@ -2558,14 +3163,14 @@ class Game:
 
             options = [
                 ("btn_gameover_restart", "【R】 重新挑战本关", (255, 220, 120)),
-                ("btn_gameover_lobby", "【T】 返回城镇大厅", (255, 235, 170)),
+                ("btn_gameover_lobby", "【T / W】 返回城镇大厅", (255, 235, 170)),
                 ("btn_gameover_menu", "【Esc】 返回主界面", (210, 210, 230)),
             ]
             mpos = pygame.mouse.get_pos()
             for idx, (btn_name, opt_text, col) in enumerate(options):
                 btn_rect = pygame.Rect(box_rect.left + 24 + idx * 168, box_rect.top + 160, 156, 44)
                 hovered = btn_rect.collidepoint(mpos)
-                self.menu_hitboxes[btn_name] = btn_rect
+                self.menu_hitboxes[btn_name] = ContentHitbox(btn_rect, border_radius=8, tag=btn_name)
                 bg_color = (75, 28, 35) if hovered else (52, 20, 26)
                 border_color = (255, 140, 140) if hovered else (160, 60, 70)
                 pygame.draw.rect(self.screen, bg_color, btn_rect, border_radius=8)
@@ -2585,14 +3190,14 @@ class Game:
             options = [
                 ("btn_pause_resume", "【1 / Esc】 继续战斗", (120, 230, 160)),
                 ("btn_pause_restart", "【2 / R】 重新开始本关", (240, 210, 100)),
-                ("btn_pause_lobby", "【T】 返回城镇大厅", (255, 225, 140)),
+                ("btn_pause_lobby", "【T / W】 返回城镇大厅", (255, 225, 140)),
                 ("btn_pause_menu", "【3 / M】 返回主菜单", (210, 220, 240)),
             ]
             mpos = pygame.mouse.get_pos()
             for idx, (btn_name, opt_text, col) in enumerate(options):
                 btn_rect = pygame.Rect(box_rect.centerx - 170, box_rect.top + 92 + idx * 48, 340, 38)
                 hovered = btn_rect.collidepoint(mpos)
-                self.menu_hitboxes[btn_name] = btn_rect
+                self.menu_hitboxes[btn_name] = ContentHitbox(btn_rect, border_radius=8, tag=btn_name)
                 bg_color = (48, 58, 86) if hovered else (32, 38, 56)
                 border_color = (130, 200, 255) if hovered else (70, 95, 140)
                 pygame.draw.rect(self.screen, bg_color, btn_rect, border_radius=8)
@@ -2602,8 +3207,12 @@ class Game:
 
         if current_state in ("PAUSED", "GAME_OVER", "VICTORY", "LEVEL_CLEAR") and self.show_hitboxes:
             self.draw_ui_hitboxes_overlay(self.screen, self.menu_hitboxes, pygame.mouse.get_pos())
+        elif current_state == "PLAYING" and self.show_hitboxes:
+            self._ensure_ui_systems()
+            self.draw_ui_hitboxes_overlay(self.screen, self.hud_hitboxes, pygame.mouse.get_pos())
 
-        self._draw_hitbox_pill()
+        if not self.bag_modal.is_open:
+            self._draw_hitbox_pill()
         pygame.display.flip()
 
     def run(self):
@@ -2623,10 +3232,16 @@ class Game:
                         self.weapon_screen.mouse_position = stage_pos
                     elif current_state == "LOBBY" and hasattr(self, "lobby"):
                         self.lobby.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=event.pos))
-                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                elif event.type == pygame.MOUSEBUTTONUP and event.button in (1, 3):
                     # Check hitbox toggle pill first
-                    if self.hitbox_pill_rect.collidepoint(event.pos):
+                    if event.button == 1 and self.hitbox_pill_rect.collidepoint(event.pos):
                         self.show_hitboxes = not self.show_hitboxes
+                        continue
+
+                    if self._handle_hud_and_bag_click(event.pos, event.button):
+                        continue
+
+                    if event.button != 1:
                         continue
 
                     stage_pos = self._map_mouse_to_stage(event.pos)
@@ -2641,7 +3256,10 @@ class Game:
                     elif current_state == "LOBBY" and hasattr(self, "lobby"):
                         res = self.lobby.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=event.pos))
                         if isinstance(res, tuple) and res[0] == "start_stage":
-                            self.start_level(res[1])
+                            self.starting_level = res[1]
+                            self.start_level(res[1], res[2] if len(res) > 2 else None)
+                        elif res == "toggle_bag":
+                            self.toggle_bag()
                         elif res == "pause_menu":
                             self.game_state = "PAUSED"
                     elif current_state == "PAUSED":
@@ -2683,6 +3301,8 @@ class Game:
                             if rect.collidepoint(event.pos):
                                 if name == "btn_levelclear_next":
                                     self.start_level(2)
+                                elif name == "btn_levelclear_lobby":
+                                    self.enter_lobby()
                                 break
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_F3:

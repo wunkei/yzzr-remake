@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Sequence
 
 import pygame
+from ui_hitbox import ContentHitbox
 
 STAGE_SIZE = (940, 580)
 FPS = 60
@@ -137,7 +138,10 @@ class StartScreen:
         self.image_dir = image_dir or IMAGE_DIR
         self.canvas = pygame.Surface(STAGE_SIZE, pygame.SRCALPHA, 32)
         self.images: dict[int | str, pygame.Surface] = {}
-        self._button_states: dict[int, tuple[pygame.Surface, pygame.Surface, pygame.Rect]] = {}
+        self._button_states: dict[
+            int,
+            tuple[pygame.Surface, pygame.Surface, pygame.Surface, pygame.Rect, pygame.mask.Mask],
+        ] = {}
         self._current_sprite_frames: dict[int, tuple[int, pygame.Surface]] = {}
         self.fonts = {size: _font(size) for size in (11, 12, 13, 14)}
         self.menu_mode = "main"
@@ -188,7 +192,7 @@ class StartScreen:
 
     def _button_state_set(
         self, button_id: int,
-    ) -> tuple[pygame.Surface, pygame.Surface, pygame.Rect]:
+    ) -> tuple[pygame.Surface, pygame.Surface, pygame.Surface, pygame.Rect, pygame.mask.Mask]:
         if button_id not in self._button_states:
             def load(state: str) -> pygame.Surface:
                 path = BUTTON_DIR / f"DefineButton2_{button_id}" / f"{state}.png"
@@ -201,9 +205,13 @@ class StartScreen:
             if up.get_size() != over.get_size() or up.get_size() != hittest.get_size():
                 raise ValueError(f"Mismatched original frames for button {button_id}")
             full_bounds = up.get_rect()
-            local_hitbox = hittest.get_bounding_rect().clip(full_bounds)
+            local_hitbox = hittest.get_bounding_rect(min_alpha=15).clip(full_bounds)
+            if local_hitbox.width <= 0 or local_hitbox.height <= 0:
+                local_hitbox = full_bounds
+            sub_hittest = hittest.subsurface(local_hitbox)
+            local_mask = pygame.mask.from_surface(sub_hittest, 15)
             self._button_states[button_id] = (
-                up, over, local_hitbox,
+                up, over, hittest, local_hitbox, local_mask,
             )
         return self._button_states[button_id]
 
@@ -241,25 +249,32 @@ class StartScreen:
         button_id: int,
         rect: pygame.Rect | tuple[int, int] | tuple[int, int, int, int],
     ) -> pygame.Rect:
-        up, over, local_hitbox = self._button_state_set(button_id)
+        up, over, hittest, local_hitbox, local_mask = self._button_state_set(button_id)
         if len(rect) == 2:
             x, y = rect
             target_rect = pygame.Rect(x, y, up.get_width(), up.get_height())
-            hitbox = pygame.Rect(
+            hitbox_rect = pygame.Rect(
                 x + local_hitbox.left,
                 y + local_hitbox.top,
                 local_hitbox.width,
                 local_hitbox.height,
             )
+            hitbox = ContentHitbox(hitbox_rect, mask=local_mask, tag=name)
         else:
             target_rect = pygame.Rect(rect)
             sx, sy = target_rect.width / up.get_width(), target_rect.height / up.get_height()
-            hitbox = pygame.Rect(
+            hitbox_rect = pygame.Rect(
                 round(target_rect.left + local_hitbox.left * sx),
                 round(target_rect.top + local_hitbox.top * sy),
                 round(local_hitbox.width * sx),
                 round(local_hitbox.height * sy),
             )
+            # Scale mask if necessary
+            scaled_sub = pygame.transform.smoothscale(
+                hittest.subsurface(local_hitbox), (hitbox_rect.width, hitbox_rect.height)
+            )
+            scaled_mask = pygame.mask.from_surface(scaled_sub, 15)
+            hitbox = ContentHitbox(hitbox_rect, mask=scaled_mask, tag=name)
         self.hitboxes[name] = hitbox
         hovered = self.mouse_position is not None and hitbox.collidepoint(self.mouse_position)
         self._hover_target[name] = hovered
@@ -274,10 +289,15 @@ class StartScreen:
             over = over.copy()
             over.set_alpha(round(255 * min(1.0, amount)))
             self.canvas.blit(over, target_rect)
-            # Distinct active hitbox boundary indicator
+            # Keep the hover indicator aligned with the original hitTest shape.
             border_surf = pygame.Surface((hitbox.width, hitbox.height), pygame.SRCALPHA)
             alpha = round(170 * min(1.0, max(amount, 0.4)))
-            pygame.draw.rect(border_surf, (255, 220, 110, alpha), border_surf.get_rect(), 2, border_radius=6)
+            if hitbox.mask is not None:
+                outline = hitbox.mask.outline()
+                if len(outline) > 2:
+                    pygame.draw.lines(border_surf, (255, 220, 110, alpha), True, outline, 2)
+            else:
+                pygame.draw.rect(border_surf, (255, 220, 110, alpha), border_surf.get_rect(), 2, border_radius=6)
             self.canvas.blit(border_surf, hitbox.topleft)
         return hitbox
 
@@ -310,7 +330,7 @@ class StartScreen:
             self.canvas, "正式版v19.20", self.fonts[13], (850, 2),
             (231, 113, 34), outline=(29, 17, 9),
         )
-        self.hitboxes["version"] = version
+        self.hitboxes["version"] = ContentHitbox(version, border_radius=4, tag="version")
 
         pygame.draw.rect(self.canvas, (0, 0, 0, 238), (0, 506, 940, 74))
         footer = (
@@ -352,7 +372,7 @@ class StartScreen:
         for line, y in lines:
             _crisp_text(self.canvas, line, self.fonts[13], (171, y), white, shadow=(35, 20, 10))
         _crisp_text(self.canvas, "勇者之刃团队 2025.1.24", self.fonts[12], (557, 432), yellow, shadow=(35, 20, 10))
-        self._draw_button("panel_back", 7299, (345, 430))
+        self._draw_button("panel_back", 7299, (334, 393))
 
     def _draw_instructions(self) -> None:
         self._draw_panel_frame(7267)
@@ -378,7 +398,7 @@ class StartScreen:
             _crisp_text(self.canvas, heading, self.fonts[13], (x, 142), (255, 193, 0), shadow=(35, 20, 10))
             for row, line in enumerate(controls):
                 _crisp_text(self.canvas, line, self.fonts[12], (x, 166 + row * 19), (240, 237, 230), shadow=(35, 20, 10))
-        self._draw_button("panel_back", 7359, (345, 410))
+        self._draw_button("panel_back", 7359, (378, 335))
 
     def _draw_age_notice(self) -> None:
         self._draw_panel_frame(7380)
@@ -388,7 +408,7 @@ class StartScreen:
         )
         for line, y in zip(lines, (115, 170, 198, 226)):
             _crisp_text(self.canvas, line, self.fonts[14], (171, y), (242, 239, 233), shadow=(35, 20, 10))
-        self._draw_button("panel_back", 7359, (345, 410))
+        self._draw_button("panel_back", 7299, (388, 380))
 
     def _draw_saves(self) -> None:
         panel_rect = pygame.Rect(106, 47, 728, 486)
@@ -400,14 +420,19 @@ class StartScreen:
             title = pygame.transform.smoothscale(title, (282, 30))
             panel.blit(title, title.get_rect(center=(364, 45)))
         self.canvas.blit(panel, panel_rect)
-        self.hitboxes["save_panel"] = panel_rect
-        self._draw_button("save_close", 7395, (770, 87))
+        self.hitboxes["save_panel"] = ContentHitbox(panel_rect, border_radius=12, tag="save_panel")
+        self._draw_button("save_close", 7395, (767, 84))
+        row_ys = (188, 282, 375, 468)
+        col_xs = (126, 496)
+        text_xs = (306, 636)
         for row in range(4):
             for column in range(2):
                 slot = row * 2 + column + 1
-                x, y = (285 if column == 0 else 655), 178 + row * 92
-                slot_rect = pygame.Rect(x - 157, y - 37, 314, 74)
-                self.hitboxes[f"slot_{slot}"] = slot_rect
+                slot_x = col_xs[column]
+                slot_cy = row_ys[row]
+                slot_w = 300
+                slot_rect = pygame.Rect(slot_x, slot_cy - 38, slot_w, 76)
+                self.hitboxes[f"slot_{slot}"] = ContentHitbox(slot_rect, border_radius=8, tag=f"slot_{slot}")
                 hovered = self.mouse_position is not None and slot_rect.collidepoint(self.mouse_position)
                 # Visual slot effective area frame
                 if hovered:
@@ -417,11 +442,13 @@ class StartScreen:
                     pygame.draw.rect(self.canvas, (75, 45, 32), slot_rect, 1, border_radius=6)
                 text = self.save_entries[slot - 1]
                 lines = tuple(part.strip() for part in text.splitlines() if part.strip()) or ("空存档",)
+                cx = text_xs[column]
+                cy = slot_cy
                 if len(lines) == 1:
-                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y), (255, 235, 190) if hovered else (228, 222, 211), centered=True, shadow=(20, 15, 10))
+                    _crisp_text(self.canvas, lines[0], self.fonts[13], (cx, cy), (255, 235, 190) if hovered else (228, 222, 211), centered=True, shadow=(20, 15, 10))
                 else:
-                    _crisp_text(self.canvas, lines[0], self.fonts[13], (x, y - 9), (255, 240, 200) if hovered else (242, 236, 224), centered=True, shadow=(20, 15, 10))
-                    _crisp_text(self.canvas, lines[1], self.fonts[11], (x, y + 10), (240, 220, 170) if hovered else (218, 206, 188), centered=True, shadow=(20, 15, 10))
+                    _crisp_text(self.canvas, lines[0], self.fonts[13], (cx, cy - 9), (255, 240, 200) if hovered else (242, 236, 224), centered=True, shadow=(20, 15, 10))
+                    _crisp_text(self.canvas, lines[1], self.fonts[11], (cx, cy + 10), (240, 220, 170) if hovered else (218, 206, 188), centered=True, shadow=(20, 15, 10))
 
     def draw(self) -> pygame.Surface:
         self._draw_base()
@@ -445,6 +472,31 @@ class StartScreen:
 
     def click(self, position: tuple[int, int]) -> str | None:
         """Handle a click in 940×580 scene coordinates and return its action."""
+        # 1. Right-hand menu buttons (and mode buttons) can be pressed at any time
+        for name in ("new_game", "load_game", "instructions", "updates", "single", "double", "mode_back"):
+            rect = self.hitboxes.get(name)
+            if rect and rect.collidepoint(position):
+                if name == "new_game":
+                    self.menu_mode = "mode"
+                    self.panel = None
+                elif name == "load_game":
+                    self.menu_mode = "main"
+                    self.panel = "load"
+                elif name == "instructions":
+                    self.menu_mode = "main"
+                    self.panel = None if self.panel == "instructions" else "instructions"
+                elif name == "updates":
+                    self.menu_mode = "main"
+                    self.panel = None if self.panel == "updates" else "updates"
+                elif name == "mode_back":
+                    self.menu_mode = "main"
+                    self.panel = None
+                elif name in ("single", "double"):
+                    self.player_mode = name
+                    self.panel = "new_save"
+                return name
+
+        # 2. Panel-specific and other hitboxes
         if (self.panel == "updates" and self.hitboxes.get("history_updates", pygame.Rect(0, 0, 0, 0)).collidepoint(position)):
             webbrowser.open(HISTORY_UPDATES_URL)
             return "history_updates"
@@ -462,23 +514,6 @@ class StartScreen:
             for name, rect in self.hitboxes.items():
                 if name.startswith("slot_") and rect.collidepoint(position):
                     return self._slot_action(int(name.removeprefix("slot_")))
-        for name, rect in reversed(tuple(self.hitboxes.items())):
-            if not rect.collidepoint(position):
-                continue
-            if name == "new_game":
-                self.menu_mode = "mode"
-            elif name == "load_game":
-                self.panel = "load"
-            elif name == "instructions":
-                self.panel = None if self.panel == "instructions" else "instructions"
-            elif name == "updates":
-                self.panel = None if self.panel == "updates" else "updates"
-            elif name == "mode_back":
-                self.menu_mode = "main"
-            elif name in ("single", "double"):
-                self.player_mode = name
-                self.panel = "new_save"
-            return name
         return None
 
     def _slot_action(self, slot: int) -> str | None:

@@ -6,6 +6,7 @@
 from pathlib import Path
 from typing import Callable, Sequence
 import pygame
+from ui_hitbox import ContentHitbox
 
 STAGE_SIZE = (940, 580)
 ROOT = Path(__file__).resolve().parent
@@ -181,8 +182,8 @@ class OpeningCutscene:
 
         # Skip button (top right)
         skip_rect = pygame.Rect(STAGE_SIZE[0] - 146, 26, 116, 38)
-        self.hitboxes["skip"] = skip_rect
-        hovered = mouse_position is not None and skip_rect.collidepoint(mouse_position)
+        self.hitboxes["skip"] = ContentHitbox(skip_rect, border_radius=6, tag="skip")
+        hovered = mouse_position is not None and self.hitboxes["skip"].collidepoint(mouse_position)
         btn_bg = (86, 48, 28) if hovered else (52, 28, 22)
         btn_border = (255, 215, 120) if hovered else (180, 130, 70)
         pygame.draw.rect(self.canvas, btn_bg, skip_rect, border_radius=6)
@@ -271,14 +272,6 @@ class WeaponSelectionScreen:
         self.toast_timer: float = 0.0
         self._last_tick: int = 0
 
-        # Pedestal and button hitboxes
-        self.hitboxes["weapon_0"] = pygame.Rect(35, 45, 185, 420)
-        self.hitboxes["weapon_1"] = pygame.Rect(250, 180, 180, 360)
-        self.hitboxes["weapon_2"] = pygame.Rect(570, 260, 180, 280)
-        self.hitboxes["weapon_3"] = pygame.Rect(780, 60, 160, 420)
-        self.hitboxes["reset"] = pygame.Rect(84, 480, 145, 98)
-        self.hitboxes["confirm"] = pygame.Rect(702, 478, 224, 100)
-
         # Base panel artwork
         self.panel_img: pygame.Surface | None = None
         panel_path = ONBOARDING_DIR / "wq_panel.png"
@@ -341,9 +334,110 @@ class WeaponSelectionScreen:
         if not self.anim_frames and self.sword_active_img is not None:
             self.anim_frames = [self.sword_active_img]
 
+        # Content-aware hitboxes with exact masks and tight visual bounds
+        self._init_hitboxes()
+
+    def _init_hitboxes(self) -> None:
+        def placed_mask(
+            rect: pygame.Rect,
+            surface: pygame.Surface | None,
+            artwork_pos: tuple[int, int],
+        ) -> pygame.mask.Mask:
+            """Place an original cropped sprite in a padded hitbox surface."""
+            target = pygame.Surface(rect.size, pygame.SRCALPHA)
+            if surface is not None:
+                bbox = surface.get_bounding_rect(min_alpha=15)
+                if bbox.width > 0 and bbox.height > 0:
+                    cropped = surface.subsurface(bbox)
+                    target.blit(cropped, (artwork_pos[0] - rect.left, artwork_pos[1] - rect.top))
+            return pygame.mask.from_surface(target, 15)
+
+        # These positions are the visible sprite bounds in WQ_Interface.  The
+        # masks come from the original MovieClip artwork, so transparent space
+        # inside these compatibility rectangles is not clickable.
+        w0_rect = pygame.Rect(32, 40, 220, 395)
+        self.hitboxes["weapon_0"] = ContentHitbox(
+            w0_rect, mask=placed_mask(w0_rect, self.sword_idle_img, (40, 40)), tag="weapon_0"
+        )
+
+        staff_path = ONBOARDING_DIR / "staff.png"
+        fist_path = ONBOARDING_DIR / "fist.png"
+        dao_path = ONBOARDING_DIR / "dao.png"
+        def load_optional(path: Path) -> pygame.Surface | None:
+            try:
+                return pygame.image.load(str(path)).convert_alpha() if path.is_file() else None
+            except Exception:
+                return None
+
+        staff_img = load_optional(staff_path)
+        fist_img = load_optional(fist_path)
+        dao_img = load_optional(dao_path)
+
+        # zhang (staff), quan (fist), and dao use their exact frame-1 silhouettes.
+        w1_rect = pygame.Rect(230, 172, 210, 308)
+        self.hitboxes["weapon_1"] = ContentHitbox(
+            w1_rect, mask=placed_mask(w1_rect, staff_img, (241, 171)), tag="weapon_1"
+        )
+        w2_rect = pygame.Rect(530, 228, 210, 297)
+        self.hitboxes["weapon_2"] = ContentHitbox(
+            w2_rect, mask=placed_mask(w2_rect, fist_img, (546, 228)), tag="weapon_2"
+        )
+        w3_rect = pygame.Rect(755, 52, 184, 420)
+        self.hitboxes["weapon_3"] = ContentHitbox(
+            w3_rect, mask=placed_mask(w3_rect, dao_img, (780, 51)), tag="weapon_3"
+        )
+
+        # Flash SimpleButtons expose their own 4_hittest artwork.  Preserve its
+        # aspect ratio and match the original panel placement, including each
+        # sign's wooden post.
+        def button_hitbox(
+            filename: str,
+            size: tuple[int, int],
+            position: tuple[int, int],
+            tag: str,
+        ) -> ContentHitbox:
+            try:
+                image = pygame.image.load(str(ONBOARDING_DIR / filename)).convert_alpha()
+                image = pygame.transform.smoothscale(image, size)
+                return ContentHitbox.from_surface(image, position, min_alpha=15, tag=tag)
+            except Exception:
+                return ContentHitbox((*position, *size), tag=tag)
+
+        self.hitboxes["reset"] = button_hitbox(
+            "reset_hittest.png", (149, 131), (84, 449), "reset"
+        )
+        self.hitboxes["confirm"] = button_hitbox(
+            "confirm_hittest.png", (146, 131), (702, 449), "confirm"
+        )
+
     def show_toast(self, msg: str, duration: float = 2.5) -> None:
         self.toast_msg = msg
         self.toast_timer = duration
+
+    def _draw_mask_effect(
+        self,
+        hitbox: ContentHitbox,
+        color: tuple[int, int, int],
+        *,
+        fill_alpha: int = 0,
+        outline_alpha: int = 200,
+        outline_width: int = 2,
+    ) -> None:
+        """Draw hover/selection feedback along the actual hit mask silhouette."""
+        if hitbox.mask is None:
+            pygame.draw.rect(self.canvas, (*color, outline_alpha), hitbox, outline_width)
+            return
+        if fill_alpha:
+            fill = hitbox.mask.to_surface(
+                setcolor=(*color, fill_alpha), unsetcolor=(0, 0, 0, 0)
+            )
+            self.canvas.blit(fill, hitbox.topleft)
+        outline = hitbox.mask.outline()
+        if len(outline) >= 2:
+            pygame.draw.lines(
+                self.canvas, (*color, outline_alpha), True,
+                [(hitbox.left + x, hitbox.top + y) for x, y in outline], outline_width
+            )
 
     def select_weapon(self, weapon_id: int) -> str | None:
         if weapon_id not in self.AVAILABLE_WEAPON_IDS:
@@ -462,13 +556,9 @@ class WeaponSelectionScreen:
             w_rect = self.hitboxes[w_key]
             hovered = mouse_position is not None and w_rect.collidepoint(mouse_position)
             if hovered or is_sel:
-                # Highlight active boundary
-                frame_surf = pygame.Surface(w_rect.size, pygame.SRCALPHA)
                 fill_alpha = 40 if is_sel else 25
-                pygame.draw.rect(frame_surf, (*col, fill_alpha), frame_surf.get_rect(), border_radius=8)
                 border_alpha = 230 if is_sel else 180
-                pygame.draw.rect(frame_surf, (*col, border_alpha), frame_surf.get_rect(), 2, border_radius=8)
-                self.canvas.blit(frame_surf, w_rect.topleft)
+                self._draw_mask_effect(w_rect, col, fill_alpha=fill_alpha, outline_alpha=border_alpha)
                 # Small label badge at bottom of pedestal
                 badge_text = label + (" ★已选" if is_sel else "")
                 b_surf = self.fonts[14].render(badge_text, True, col)
@@ -478,14 +568,9 @@ class WeaponSelectionScreen:
                 pygame.draw.rect(self.canvas, col, b_rect, 1, border_radius=4)
                 self.canvas.blit(b_surf, (b_rect.x + 8, b_rect.y + 3))
             else:
-                # Subtle corner brackets in idle state indicating active area
-                corner_len = 14
-                c_col = (130, 100, 70, 130)
-                # Top-left, top-right, bottom-left, bottom-right corner marks
-                pygame.draw.lines(self.canvas, (110, 80, 50), False, [(w_rect.left, w_rect.top + corner_len), (w_rect.left, w_rect.top), (w_rect.left + corner_len, w_rect.top)], 1)
-                pygame.draw.lines(self.canvas, (110, 80, 50), False, [(w_rect.right - corner_len, w_rect.top), (w_rect.right, w_rect.top), (w_rect.right, w_rect.top + corner_len)], 1)
-                pygame.draw.lines(self.canvas, (110, 80, 50), False, [(w_rect.left, w_rect.bottom - corner_len), (w_rect.left, w_rect.bottom), (w_rect.left + corner_len, w_rect.bottom)], 1)
-                pygame.draw.lines(self.canvas, (110, 80, 50), False, [(w_rect.right - corner_len, w_rect.bottom), (w_rect.right, w_rect.bottom), (w_rect.right, w_rect.bottom - corner_len)], 1)
+                # Keep the debug affordance on the actual silhouette, rather
+                # than drawing corner marks for the rectangular bounds.
+                self._draw_mask_effect(w_rect, (110, 80, 50), outline_alpha=100, outline_width=1)
 
         # 3b. Reset and Confirm wood sign buttons effective area display
         for b_name, b_label, b_color in [
@@ -493,15 +578,11 @@ class WeaponSelectionScreen:
             ("confirm", "确认启程", (255, 225, 120)),
         ]:
             raw_rect = self.hitboxes[b_name]
-            inner_rect = raw_rect.inflate(-6, -6)
             hovered = mouse_position is not None and raw_rect.collidepoint(mouse_position)
             if hovered:
-                glow_surf = pygame.Surface(inner_rect.size, pygame.SRCALPHA)
-                glow_surf.fill((*b_color, 45))
-                pygame.draw.rect(glow_surf, (*b_color, 240), glow_surf.get_rect(), 2, border_radius=8)
-                self.canvas.blit(glow_surf, inner_rect.topleft)
+                self._draw_mask_effect(raw_rect, b_color, fill_alpha=45, outline_alpha=240)
             else:
-                pygame.draw.rect(self.canvas, (150, 110, 65), inner_rect, 1, border_radius=8)
+                self._draw_mask_effect(raw_rect, (150, 110, 65), outline_alpha=180, outline_width=1)
 
         # 4. Top-left status panel
         cover_rect = pygame.Rect(0, 0, 195, 62)
@@ -588,7 +669,9 @@ class WeaponSelectionScreen:
             return self.select_weapon(0)
 
         # Other weapons (unselectable, displays toast)
-        for locked_id in (1, 2, 3):
+        # The original SetProfession script binds zhang and quan here.  dao
+        # (the fourth artwork) has no MouseEvent.CLICK listener in Flash.
+        for locked_id in (1, 2):
             if self.hitboxes[f"weapon_{locked_id}"].collidepoint(point):
                 return self.select_weapon(locked_id)
 

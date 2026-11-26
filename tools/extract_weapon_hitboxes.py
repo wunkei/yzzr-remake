@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SWF = ROOT / "yzzr_all_swf" / "WuQi_X0_v1905.swf"
 OUTPUT = ROOT / "python_assets" / "weapon_hitboxes.json"
-ROOT_SPRITES = (1681, 1904, 1235, 1044)
+ROOT_SPRITES = (1681, 1904, 1235, 1044, 492)
 HIT_CLASS_ID = "48"
 
 
@@ -143,8 +143,17 @@ def extract(xml_path: Path, output: Path = OUTPUT) -> dict:
         origin = [pad_x - root_bounds[0] / 20, pad_y - root_bounds[1] / 20]
 
         frame_data = {}
+        additive_frames = []
         for frame_number, display_list in enumerate(frame_display_lists(sprite), 1):
             boxes = []
+            blend_modes = sorted({
+                int(entry["blendMode"])
+                for entry in display_list.values()
+                if str(entry.get("blendMode", "")).isdigit()
+                and int(entry["blendMode"]) != 0
+            })
+            if 8 in blend_modes:
+                additive_frames.append(frame_number)
             for depth, entry in display_list.items():
                 if entry.get("characterId") != HIT_CLASS_ID:
                     continue
@@ -167,6 +176,7 @@ def extract(xml_path: Path, output: Path = OUTPUT) -> dict:
             "root_origin": [round(origin[0], 3), round(origin[1], 3)],
             "frame_count": int(sprite.attrib["frameCount"]),
             "active_frames": frame_data,
+            "additive_frames": additive_frames,
         }
 
     output.parent.mkdir(parents=True, exist_ok=True)

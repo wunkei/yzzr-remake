@@ -1,0 +1,6 @@
+with open('(SWF Data)/scripts/src/Skin.as', 'r', encoding='utf-8', errors='ignore') as f:
+    text = f.read()
+
+idx = text.find('function NowHPxx')
+if idx != -1:
+    print(text[idx:idx+2000])

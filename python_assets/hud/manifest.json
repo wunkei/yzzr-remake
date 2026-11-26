@@ -1,0 +1,203 @@
+{
+  "level_plate_border": {
+    "size": [
+      49,
+      40
+    ],
+    "inner_size": [
+      37,
+      28
+    ],
+    "pad": 6,
+    "rel_frame_pos": [
+      54.81,
+      27.2
+    ]
+  },
+  "boss": {
+    "size": [
+      450,
+      53
+    ],
+    "bar_rect": [
+      53,
+      24,
+      393,
+      26
+    ],
+    "portrait_rect": [
+      2,
+      2,
+      47,
+      47
+    ],
+    "crop": [
+      19,
+      29,
+      469,
+      82
+    ]
+  },
+  "level_digits": {
+    "count": 10,
+    "frame_w": 25,
+    "frame_h": 33,
+    "crop": [
+      0,
+      0,
+      25,
+      33
+    ]
+  },
+  "combo_digits": {
+    "count": 10,
+    "frame_w": 104,
+    "frame_h": 116,
+    "crop": [
+      0,
+      0,
+      104,
+      116
+    ]
+  },
+  "exp_ring": {
+    "count": 100,
+    "frame_w": 53,
+    "frame_h": 98,
+    "crop": [
+      41,
+      70,
+      78,
+      152
+    ],
+    "pad": 8,
+    "flipped_p1": true,
+    "rel_frame_pos": [
+      32.45,
+      -2.04
+    ]
+  },
+  "buff_yuhuo": {
+    "count": 10,
+    "frame_w": 32,
+    "frame_h": 36,
+    "crop": [
+      6,
+      5,
+      38,
+      41
+    ]
+  },
+  "enemy_hp": {
+    "count": 100,
+    "frame_w": 59,
+    "frame_h": 10,
+    "crop": [
+      5,
+      4,
+      64,
+      14
+    ]
+  },
+  "item_cd": {
+    "count": 50,
+    "frame_w": 52,
+    "frame_h": 50,
+    "crop": [
+      2,
+      3,
+      54,
+      53
+    ]
+  },
+  "skill_cd": {
+    "count": 50,
+    "frame_w": 42,
+    "frame_h": 40,
+    "crop": [
+      2,
+      3,
+      44,
+      43
+    ]
+  },
+  "player_hud": {
+    "frame_size": [
+      225,
+      100
+    ],
+    "stage_origin": [
+      4,
+      4
+    ],
+    "hp_pos": [
+      80.0,
+      18.5
+    ],
+    "hp_mask": {
+      "offset_x": -0.25,
+      "width": 130.5
+    },
+    "mp_pos": [
+      80.0,
+      55.95
+    ],
+    "mp_mask": {
+      "offset_x": -0.25,
+      "width": 130.5
+    },
+    "hp_label_pos": [
+      103.6,
+      32.1
+    ],
+    "hp_txt_pos": [
+      123.85,
+      32.1
+    ],
+    "mp_label_pos": [
+      103.35,
+      54.0
+    ],
+    "mp_txt_pos": [
+      123.85,
+      54.0
+    ],
+    "head_rect": [
+      -2.69,
+      15.26,
+      66.99,
+      62.72
+    ],
+    "level_border_pos": [
+      60.81,
+      33.2
+    ],
+    "level_border_pad": 6,
+    "level_1_origin": [
+      72.25,
+      37.95
+    ],
+    "level_2_origin": [
+      86.75,
+      37.95
+    ],
+    "level_digit_scale": 0.59,
+    "level_digit_anchor_x": 13,
+    "exp_pos": [
+      40.45,
+      5.96
+    ],
+    "exp_pad": 8,
+    "quick_slots": {
+      "start_x": 211.7,
+      "y": 28.4,
+      "step_x": 36.8,
+      "size": 35
+    },
+    "buff_slots": {
+      "start_x": 222.75,
+      "y": 71.7,
+      "step_x": 29.0
+    }
+  }
+}

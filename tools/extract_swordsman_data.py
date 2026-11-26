@@ -35,6 +35,7 @@ def extract(source: Path) -> tuple[ET.Element, list[dict[str, object]]]:
             "description": node.findtext("技能描述"),
             "frames": node.findtext("帧数"),
             "cooldown": node.findtext("技能冷却"),
+            "mana_cost": node.findtext("魔法消耗"),
             "duration": node.findtext("持续时间"),
             "effect_type": node.findtext("作用类型"),
             "values": values,

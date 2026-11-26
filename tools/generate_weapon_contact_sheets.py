@@ -12,6 +12,7 @@ WEAPON_DIRS = (
     "DefineSprite_1681_剑金9",
     "DefineSprite_1235_剑蓝1",
     "DefineSprite_1044_剑蓝4",
+    "DefineSprite_492_剑金10",
 )
 FRAME_START, FRAME_END = 47, 78
 CELL_WIDTH, CELL_HEIGHT = 160, 112

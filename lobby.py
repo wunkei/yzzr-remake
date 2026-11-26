@@ -14,9 +14,13 @@ from typing import Any, Callable
 import pygame
 
 from levels import ALL_STAGES, STAGES, Stage
+from monster_system import Platform
+from sel_map import OriginalSelMap
+from ui_hitbox import ContentHitbox
 
 WIDTH, HEIGHT = 960, 540
-GROUND_Y = 448
+GROUND_Y = 510
+LOBBY_GROUND_Y = 510
 LOBBY_WORLD_WIDTH = 2600
 
 _ROOT = Path(__file__).resolve().parent
@@ -106,6 +110,9 @@ class LobbyScene:
         self.selected_stage: int = 1
         self.selected_difficulty: str = "普通"
         self.difficulties: list[str] = ["普通", "困难", "英雄", "炼狱"]
+        # SelMap keeps the page between openings, matching the original SWF.
+        self.map_page: int = 1
+        self.sel_map = OriginalSelMap(self)
 
         # Hitboxes for UI click handling
         self.hitboxes: dict[str, pygame.Rect] = {}
@@ -116,11 +123,14 @@ class LobbyScene:
         self._init_fonts()
 
         # Visual assets
+        self.ground_y: int = GROUND_Y
+        self.world_width: int = LOBBY_WORLD_WIDTH
         self.background: pygame.Surface | None = None
         self.door_frames: list[pygame.Surface] = []
         self.door_frame_index: int = 0
         self.door_timer: float = 0.0
         self._level_previews: dict[int, pygame.Surface] = {}
+        self._sel_map_assets: dict[str, pygame.Surface] = {}
         self._load_assets()
 
         # NPC definitions: removed per requirement (keep only background and walkable length)
@@ -158,6 +168,24 @@ class LobbyScene:
                     except Exception:
                         pass
 
+        # These are the extracted wooden frames and map backdrops used to
+        # keep the SelMap panel visually close to the original Flash UI.
+        map_dir = _ROOT / "Map0_v1910" / "images"
+        for key, filename in {
+            "frame": "505.png",
+            "frame_dark": "154.png",
+            "backdrop": "462.png",
+            "clouds": "501.png",
+        }.items():
+            path = map_dir / filename
+            if not path.is_file():
+                continue
+            try:
+                image = pygame.image.load(str(path))
+                self._sel_map_assets[key] = image.convert_alpha() if image.get_alpha() is not None else image.convert()
+            except Exception:
+                continue
+
     def show_toast(self, message: str, duration: float = 2.0) -> None:
         self.toast_message = message
         self.toast_timer = duration
@@ -186,9 +214,15 @@ class LobbyScene:
         # Update player in peace mode
         if self.game and hasattr(self.game, "player") and self.game.player:
             player = self.game.player
-            if self.active_modal is None:
+            bag_open = bool(self.game and getattr(self.game, "bag_modal", None) and self.game.bag_modal.is_open)
+            if self.active_modal is None and not bag_open:
                 # Normal peaceful movement
-                player.update(dt, keys if keys is not None else pygame.key.get_pressed())
+                player.update(
+                    dt,
+                    keys if keys is not None else pygame.key.get_pressed(),
+                    world_width=LOBBY_WORLD_WIDTH,
+                    platforms=[Platform(pygame.Rect(0, GROUND_Y, LOBBY_WORLD_WIDTH, 120), is_one_way=False)],
+                )
                 # Constrain player inside lobby bounds
                 if player.rect.left < 50:
                     player.rect.left = 50
@@ -213,16 +247,35 @@ class LobbyScene:
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
+                if self.game and hasattr(self.game, "bag_modal") and self.game.bag_modal.is_open:
+                    self.game.bag_modal.is_open = False
+                    return None
+                if self.active_modal == "sel_map":
+                    if self.sel_map.handle_key(event.key) == "close_modal":
+                        self.active_modal = None
+                    return None
                 if self.active_modal is not None:
                     self.active_modal = None
                     return None
                 return "pause_menu"
 
+            if self.active_modal == "sel_map" and event.key != pygame.K_m:
+                if self.sel_map.handle_key(event.key) == "handled":
+                    return None
+
+            # Shortcut B: Toggle Bag Modal
+            if event.key == pygame.K_b:
+                return "toggle_bag"
+
             # Shortcut M: Open Map Selection Modal
             if event.key == pygame.K_m:
+                if self.game and hasattr(self.game, "bag_modal"):
+                    self.game.bag_modal.is_open = False
                 if self.active_modal == "sel_map":
                     self.active_modal = None
+                    self.sel_map.sub_panel = None
                 else:
+                    self.sel_map.open(self.map_page)
                     self.active_modal = "sel_map"
                 return None
 
@@ -232,6 +285,7 @@ class LobbyScene:
                     px = self.game.player.rect.centerx
                     # Check portal distance (door at x=2460)
                     if abs(px - 2460) < 100:
+                        self.sel_map.open(self.map_page)
                         self.active_modal = "sel_map"
                         return None
                     # Check nearest NPC
@@ -240,11 +294,17 @@ class LobbyScene:
                         self.active_modal = npc.id
                         return None
 
-            # W key near door also opens map selection
-            if self.active_modal is None and event.key == pygame.K_w:
+            # W / Up key near door opens map selection, or near NPC opens interaction
+            if self.active_modal is None and event.key in (pygame.K_w, pygame.K_UP):
                 if self.game and hasattr(self.game, "player") and self.game.player:
-                    if abs(self.game.player.rect.centerx - 2460) < 100:
+                    px = self.game.player.rect.centerx
+                    if abs(px - 2460) < 100:
+                        self.sel_map.open(self.map_page)
                         self.active_modal = "sel_map"
+                        return None
+                    npc, dist = self.get_nearest_npc(px)
+                    if npc and dist < 90:
+                        self.active_modal = npc.id
                         return None
 
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -257,12 +317,19 @@ class LobbyScene:
             # Persistent bottom-right map selection button
             btn_rect = self.hitboxes.get("btn_map_select")
             if btn_rect and btn_rect.collidepoint(mpos):
+                self.sel_map.open(self.map_page)
                 self.active_modal = "sel_map"
                 return None
+
+            # Top HUD Bag button
+            bag_rect = self.hitboxes.get("btn_bag")
+            if bag_rect and bag_rect.collidepoint(mpos):
+                return "toggle_bag"
 
             # Click on Door
             door_rect = self.hitboxes.get("door_hitbox")
             if door_rect and door_rect.collidepoint(mpos):
+                self.sel_map.open(self.map_page)
                 self.active_modal = "sel_map"
                 return None
 
@@ -276,35 +343,15 @@ class LobbyScene:
         return None
 
     def _handle_modal_click(self, pos: tuple[int, int]) -> tuple[str, Any, Any] | str | None:
+        if self.active_modal == "sel_map":
+            return self.sel_map.handle_click(pos, self.hitboxes)
+
         # Close button
         if self.hitboxes.get("modal_close") and self.hitboxes["modal_close"].collidepoint(pos):
             self.active_modal = None
             return None
 
-        if self.active_modal == "sel_map":
-            # Stage cards
-            for level in STAGES:
-                card_rect = self.hitboxes.get(f"stage_card_{level}")
-                if card_rect and card_rect.collidepoint(pos):
-                    self.selected_stage = level
-                launch_rect = self.hitboxes.get(f"stage_launch_{level}")
-                if launch_rect and launch_rect.collidepoint(pos):
-                    stage_to_start = level
-                    diff = self.selected_difficulty
-                    self.active_modal = None
-                    return ("start_stage", stage_to_start, diff)
-
-            # Difficulty buttons
-            for diff in self.difficulties:
-                diff_rect = self.hitboxes.get(f"diff_{diff}")
-                if diff_rect and diff_rect.collidepoint(pos):
-                    self.selected_difficulty = diff
-
-            # Back button
-            if self.hitboxes.get("sel_map_back") and self.hitboxes["sel_map_back"].collidepoint(pos):
-                self.active_modal = None
-
-        elif self.active_modal == "potion":
+        if self.active_modal == "potion":
             if self.hitboxes.get("buy_hp_small") and self.hitboxes["buy_hp_small"].collidepoint(pos):
                 if self.gold >= 50:
                     self.gold -= 50
@@ -433,12 +480,12 @@ class LobbyScene:
                 pygame.draw.ellipse(glow_surf, (255, 190, 80, max(0, min(255, glow_val // 3))), glow_surf.get_rect())
                 surface.blit(glow_surf, (screen_rect.x - 15, screen_rect.y - 15))
                 surface.blit(frame, screen_rect)
-                self.hitboxes["door_hitbox"] = screen_rect
+                self.hitboxes["door_hitbox"] = ContentHitbox(screen_rect, border_radius=12, tag="door_hitbox")
         else:
             d_rect = pygame.Rect(round(door_x - 45), GROUND_Y - 140, 90, 140)
             pygame.draw.rect(surface, (70, 45, 100), d_rect, border_radius=8)
             pygame.draw.rect(surface, (200, 160, 255), d_rect, 3, border_radius=8)
-            self.hitboxes["door_hitbox"] = d_rect
+            self.hitboxes["door_hitbox"] = ContentHitbox(d_rect, border_radius=8, tag="door_hitbox")
 
     def _draw_npcs(self, surface: pygame.Surface) -> None:
         for npc in self.npcs:
@@ -446,16 +493,18 @@ class LobbyScene:
             screen_rect = pygame.Rect(round(screen_x), npc.rect.y, npc.rect.width, npc.rect.height)
             if -100 < screen_rect.right and screen_rect.left < WIDTH + 100:
                 # Shadow
-                pygame.draw.ellipse(surface, (20, 16, 14), (screen_rect.centerx - 28, GROUND_Y - 6, 56, 12))
+                sh_surf = pygame.Surface((50, 11), pygame.SRCALPHA)
+                pygame.draw.ellipse(sh_surf, (8, 10, 18, 72), (0, 0, 50, 11))
+                pygame.draw.ellipse(sh_surf, (6, 8, 15, 105), (8, 2, 34, 7))
+                surface.blit(sh_surf, (screen_rect.centerx - 25, GROUND_Y - 6))
                 # NPC sprite
                 if npc.image:
                     surface.blit(npc.image, screen_rect)
+                    self.hitboxes[f"npc_{npc.id}"] = ContentHitbox.from_surface(npc.image, screen_rect.topleft, min_alpha=15, tag=f"npc_{npc.id}")
                 else:
                     pygame.draw.rect(surface, (80, 60, 50), screen_rect, border_radius=6)
                     _crisp_text(surface, npc.name[:2], self.fonts[14], screen_rect.center, (240, 220, 180), centered=True)
-
-                # Store screen hitbox for clicking
-                self.hitboxes[f"npc_{npc.id}"] = screen_rect
+                    self.hitboxes[f"npc_{npc.id}"] = ContentHitbox(screen_rect, border_radius=6, tag=f"npc_{npc.id}")
 
                 # Skill mentor special exclamation mark (JiNengTiShi)
                 if npc.id == "skill":
@@ -500,6 +549,18 @@ class LobbyScene:
         slot_num = getattr(self.game, "current_slot", 1) if self.game else 1
         _crisp_text(surface, f"勇者村 · 城镇安全区 [槽位 {slot_num}]", self.fonts[14], (28, 24), (255, 225, 160))
 
+        # Top-middle original Bag button (gap x=404..492; clear of pixel (421, 538) and bottom-right map btn)
+        if self.active_modal is None:
+            if self.game and hasattr(self.game, "hud"):
+                self.game.hud.draw_lobby_bag_button(surface, self.hitboxes, self.fonts, self.mouse_pos)
+            else:
+                bag_btn = pygame.Rect(404, 14, 88, 38)
+                b_hov = bag_btn.collidepoint(self.mouse_pos)
+                self.hitboxes["btn_bag"] = ContentHitbox(bag_btn, border_radius=8, tag="btn_bag")
+                pygame.draw.rect(surface, (84, 46, 24) if b_hov else (38, 25, 20), bag_btn, border_radius=8)
+                pygame.draw.rect(surface, (255, 215, 115) if b_hov else (165, 118, 62), bag_btn, 2 if b_hov else 1, border_radius=8)
+                _crisp_text(surface, "背包[B]", self.fonts[13], bag_btn.center, (255, 228, 155), centered=True)
+
         # Top-right currency and potions (leaving right margin for hitbox toggle pill)
         stat_rect = pygame.Rect(WIDTH - 460, 14, 296, 38)
         pygame.draw.rect(surface, (28, 20, 18, 220), stat_rect, border_radius=8)
@@ -512,7 +573,7 @@ class LobbyScene:
         # -------------------------------------------------------------
         btn_rect = pygame.Rect(WIDTH - 150, HEIGHT - 56, 134, 44)
         hovered = btn_rect.collidepoint(self.mouse_pos)
-        self.hitboxes["btn_map_select"] = btn_rect
+        self.hitboxes["btn_map_select"] = ContentHitbox(btn_rect, border_radius=8, tag="btn_map_select")
 
         # Button background with warm medieval golden glow
         bg_col = (90, 48, 26) if hovered else (52, 28, 20)
@@ -527,6 +588,12 @@ class LobbyScene:
         _crisp_text(surface, "地图选择 [M]", self.fonts[18], btn_rect.center, (255, 230, 170), centered=True)
 
     def _draw_modal(self, surface: pygame.Surface) -> None:
+        self.hitboxes.pop("door_hitbox", None)
+        self.hitboxes.pop("btn_map_select", None)
+        for k in tuple(self.hitboxes):
+            if k.startswith("npc_"):
+                self.hitboxes.pop(k, None)
+
         # Dim overlay
         dim_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         dim_surf.fill((0, 0, 0, 180))
@@ -550,85 +617,7 @@ class LobbyScene:
             self._draw_explorer_modal(surface)
 
     def _draw_sel_map_modal(self, surface: pygame.Surface) -> None:
-        frame = pygame.Rect(90, 40, 780, 460)
-        pygame.draw.rect(surface, (40, 26, 22), frame, border_radius=12)
-        pygame.draw.rect(surface, (200, 145, 75), frame, 3, border_radius=12)
-
-        # Header
-        _crisp_text(surface, "出征冒险 · 地图选择 (SelMap)", self.fonts[24], (frame.x + 36, frame.y + 24), (255, 225, 150))
-        _crisp_text(surface, "选择目标关卡与难度，点击【开始出征】即刻进入战斗！快捷键 [M] 或 [ESC] 可随时关闭。", self.fonts[13], (frame.x + 38, frame.y + 60), (220, 210, 195))
-
-        # Close [X] button
-        close_btn = pygame.Rect(frame.right - 44, frame.y + 16, 28, 28)
-        pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
-        pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
-        _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
-
-        # Stage cards
-        for i, (level, stage) in enumerate(STAGES.items()):
-            card_x = frame.x + 36 + i * 350
-            card_y = frame.y + 95
-            card = pygame.Rect(card_x, card_y, 330, 260)
-            is_selected = (self.selected_stage == level)
-            hovered = card.collidepoint(self.mouse_pos)
-
-            card_bg = (65, 42, 32) if is_selected else ((52, 34, 28) if hovered else (38, 25, 22))
-            border_c = (255, 215, 110) if is_selected else ((180, 130, 70) if hovered else (110, 75, 45))
-            pygame.draw.rect(surface, card_bg, card, border_radius=10)
-            pygame.draw.rect(surface, border_c, card, 3 if is_selected else 2, border_radius=10)
-            self.hitboxes[f"stage_card_{level}"] = card
-
-            # Preview Image
-            if level not in self._level_previews and stage.background.is_file():
-                try:
-                    img = pygame.image.load(str(stage.background))
-                    v_rect = pygame.Rect(0, 0, min(img.get_width(), round(img.get_height() * 314 / 120)), img.get_height())
-                    v_rect.center = img.get_rect().center
-                    self._level_previews[level] = pygame.transform.smoothscale(img.subsurface(v_rect), (314, 120))
-                except Exception:
-                    pass
-
-            if level in self._level_previews:
-                surface.blit(self._level_previews[level], (card.x + 8, card.y + 8))
-            else:
-                pygame.draw.rect(surface, (20, 15, 15), (card.x + 8, card.y + 8, 314, 120), border_radius=6)
-
-            # Titles & Boss
-            _crisp_text(surface, f"第 {level} 关 · {stage.name}", self.fonts[18], (card.x + 14, card.y + 138), (255, 225, 160))
-            _crisp_text(surface, f"镇守首领: {stage.boss}", self.fonts[13], (card.x + 14, card.y + 168), (240, 180, 120))
-            desc = "幽暗森林深处的猛兽，擅长毒素与践踏" if level == 1 else "熔岩深渊的龙魔支配者，掌控毁灭火柱"
-            _crisp_text(surface, desc, self.fonts[11], (card.x + 14, card.y + 190), (190, 180, 170))
-
-            # Launch Button
-            l_btn = pygame.Rect(card.x + 14, card.y + 215, 302, 34)
-            l_hov = l_btn.collidepoint(self.mouse_pos)
-            l_bg = (130, 60, 20) if l_hov else (90, 40, 16)
-            pygame.draw.rect(surface, l_bg, l_btn, border_radius=6)
-            pygame.draw.rect(surface, (255, 210, 100), l_btn, 2 if l_hov else 1, border_radius=6)
-            _crisp_text(surface, f"开始出征 · 第 {level} 关", self.fonts[16], l_btn.center, (255, 240, 190), centered=True)
-            self.hitboxes[f"stage_launch_{level}"] = l_btn
-
-        # Difficulty Bar
-        diff_label = "难度选择: "
-        _crisp_text(surface, diff_label, self.fonts[14], (frame.x + 40, frame.y + 382), (230, 210, 170))
-        for idx, diff in enumerate(self.difficulties):
-            d_btn = pygame.Rect(frame.x + 120 + idx * 80, frame.y + 374, 70, 30)
-            is_active = (self.selected_difficulty == diff)
-            d_hov = d_btn.collidepoint(self.mouse_pos)
-            d_bg = (110, 50, 20) if is_active else ((60, 40, 32) if d_hov else (44, 28, 24))
-            pygame.draw.rect(surface, d_bg, d_btn, border_radius=6)
-            pygame.draw.rect(surface, (255, 200, 90) if is_active else (130, 90, 55), d_btn, 2 if is_active else 1, border_radius=6)
-            _crisp_text(surface, diff, self.fonts[13], d_btn.center, (255, 230, 160) if is_active else (200, 185, 170), centered=True)
-            self.hitboxes[f"diff_{diff}"] = d_btn
-
-        # Bottom return button
-        back_btn = pygame.Rect(frame.right - 130, frame.y + 372, 94, 34)
-        b_hov = back_btn.collidepoint(self.mouse_pos)
-        pygame.draw.rect(surface, (70, 35, 26) if b_hov else (50, 26, 20), back_btn, border_radius=6)
-        pygame.draw.rect(surface, (180, 120, 60), back_btn, 2, border_radius=6)
-        _crisp_text(surface, "返回大厅", self.fonts[14], back_btn.center, (240, 220, 180), centered=True)
-        self.hitboxes["sel_map_back"] = back_btn
+        self.sel_map.draw(surface, self.hitboxes, self.fonts, self.mouse_pos)
 
     def _draw_potion_modal(self, surface: pygame.Surface) -> None:
         frame = pygame.Rect(180, 70, 600, 400)
@@ -666,7 +655,7 @@ class LobbyScene:
             pygame.draw.rect(surface, (110, 55, 22) if (can_afford and b_hov) else (70, 38, 24), buy_btn, border_radius=6)
             pygame.draw.rect(surface, (255, 205, 95) if can_afford else (110, 80, 55), buy_btn, 2 if (can_afford and b_hov) else 1, border_radius=6)
             _crisp_text(surface, f"购买 ({cost})", self.fonts[12], buy_btn.center, (255, 235, 180) if can_afford else (160, 140, 120), centered=True)
-            self.hitboxes[btn_name] = buy_btn
+            self.hitboxes[btn_name] = ContentHitbox(buy_btn, border_radius=6, tag=btn_name)
 
     def _draw_skill_modal(self, surface: pygame.Surface) -> None:
         frame = pygame.Rect(180, 70, 600, 400)
@@ -682,7 +671,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
         _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
+        self.hitboxes["modal_close"] = ContentHitbox(close_btn, border_radius=6, tag="modal_close")
 
         skills_list = [
             ("upgrade_whirlwind", f"主动技能 · 旋风斩 (Lv.{self.skills['whirlwind']})", "周身回旋剑气攻击，伤害与范围随等级提升", "100 金币", self.gold >= 100),
@@ -704,7 +693,7 @@ class LobbyScene:
             pygame.draw.rect(surface, (255, 205, 95) if active else (110, 80, 55), btn, 2 if (active and b_hov) else 1, border_radius=6)
             label = "已掌握" if (btn_name == "learn_double_jump" and self.double_jump_unlocked) else f"升级 ({cost})"
             _crisp_text(surface, label, self.fonts[12], btn.center, (255, 235, 180) if active else (160, 140, 120), centered=True)
-            self.hitboxes[btn_name] = btn
+            self.hitboxes[btn_name] = ContentHitbox(btn, border_radius=6, tag=btn_name)
 
     def _draw_storage_modal(self, surface: pygame.Surface) -> None:
         frame = pygame.Rect(180, 70, 600, 380)
@@ -719,7 +708,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
         _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
+        self.hitboxes["modal_close"] = ContentHitbox(close_btn, border_radius=6, tag="modal_close")
 
         # Content Box
         list_box = pygame.Rect(frame.x + 30, frame.y + 90, 540, 200)
@@ -737,7 +726,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (100, 50, 22) if b_hov else (65, 35, 22), take_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 160, 80), take_btn, 1, border_radius=6)
         _crisp_text(surface, "取出首件物品", self.fonts[13], take_btn.center, (255, 230, 170), centered=True)
-        self.hitboxes["storage_take"] = take_btn
+        self.hitboxes["storage_take"] = ContentHitbox(take_btn, border_radius=6, tag="storage_take")
 
     def _draw_chief_modal(self, surface: pygame.Surface) -> None:
         frame = pygame.Rect(180, 70, 600, 360)
@@ -751,7 +740,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
         _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
+        self.hitboxes["modal_close"] = ContentHitbox(close_btn, border_radius=6, tag="modal_close")
 
         dialogue_lines = [
             "“年轻的勇者啊，看到你通过试炼并回到村庄，我感到无比欣慰。”",
@@ -769,7 +758,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (255, 215, 100) if can_claim else (120, 90, 60), gift_btn, 2 if can_claim else 1, border_radius=6)
         label = "已领取村长赠礼" if self.chief_gift_claimed else "领取新手补给礼包"
         _crisp_text(surface, label, self.fonts[14], gift_btn.center, (255, 235, 180) if can_claim else (160, 140, 120), centered=True)
-        self.hitboxes["claim_chief_gift"] = gift_btn
+        self.hitboxes["claim_chief_gift"] = ContentHitbox(gift_btn, border_radius=6, tag="claim_chief_gift")
 
     def _draw_board_modal(self, surface: pygame.Surface) -> None:
         frame = pygame.Rect(180, 70, 600, 360)
@@ -783,7 +772,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
         _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
+        self.hitboxes["modal_close"] = ContentHitbox(close_btn, border_radius=6, tag="modal_close")
 
         bounties = [
             ("【悬赏目标 1】 幽林双头巨蜥", "出没区域: 第 1 关 · 幽林试炼", "赏金: 500 金币  |  击杀点数 +100"),
@@ -810,7 +799,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
         _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
+        self.hitboxes["modal_close"] = ContentHitbox(close_btn, border_radius=6, tag="modal_close")
 
         features = [
             ("装备强化", "消耗强化石提升武器/防具基础攻击与防御属性"),
@@ -837,7 +826,7 @@ class LobbyScene:
         pygame.draw.rect(surface, (70, 30, 25), close_btn, border_radius=6)
         pygame.draw.rect(surface, (220, 140, 80), close_btn, 1, border_radius=6)
         _crisp_text(surface, "×", self.fonts[18], close_btn.center, (255, 230, 180), centered=True)
-        self.hitboxes["modal_close"] = close_btn
+        self.hitboxes["modal_close"] = ContentHitbox(close_btn, border_radius=6, tag="modal_close")
 
         _crisp_text(surface, "远古遗迹考察中：当收集到全部女神像碎片后，将在此开启远古秘境。", self.fonts[13], (frame.x + 32, frame.y + 110), (240, 220, 180))
         _crisp_text(surface, "当前可以先在右侧传送门出征挑战【幽林试炼】与【烈焰殿堂】！", self.fonts[13], (frame.x + 32, frame.y + 145), (255, 210, 100))
